@@ -1,0 +1,206 @@
+@font-face {
+  font-family: Montserrat;
+  src: url('./Montserrat-Regular.woff2');
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  font-family: Montserrat;
+}
+
+body {
+  background: #fcfcfc;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 10px 10px;
+  max-width: 1700px;
+  margin: 20px 20px 30px 20px;
+}
+
+header h1 {
+  font-size: 2rem;
+  margin-right: 20px;
+}
+
+footer {
+  text-align: center;
+  padding-bottom: 14px;
+}
+
+#parent-container {
+  display: flex;
+  flex-flow: column;
+  row-gap: 24px;
+  margin: 0 20px 30px 20px;
+}
+
+#status {
+  font-size: 0.8rem;
+}
+
+#scrape-status {
+  font-size: 0.7rem;
+}
+
+.container {
+  padding: 10px 0;
+  min-height: 48px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: rgba(50, 50, 93, 0.25) 0px 13px 27px -5px, rgba(0, 0, 0, 0.3) 0px 8px 16px -8px;
+}
+
+.container h2 {
+  padding: 0 10px;
+  font-size: 1.5rem;
+}
+
+.container .l-articles {
+  margin-top: 10px;
+}
+
+.container .article {
+  display: flex;
+  flex-flow: column;
+  padding: 10px 10px;
+  font-size: 1rem;
+}
+
+.container .article .details {
+  display: flex;
+  flex-flow: row;
+  margin-bottom: 2px;
+  font-size: 1rem;
+}
+
+.container .article .details .date {
+  order: 2;
+  flex-grow: 2;
+  overflow: hidden;
+  text-align: right;
+}
+
+.container .article .details .price {
+  order: 1;
+  flex-grow: 1;
+  overflow: hidden;
+  text-align: left;
+}
+
+.container .article .title {
+  height: 20px;
+  overflow: hidden;
+}
+
+.container .article .title a:link,
+.container .article .title a:visited,
+.container .article .title a:hover {
+  color:#222222;
+}
+
+.container .article .title a:hover {
+  font-weight: 600;
+}
+
+.new-element {
+  background-color: #ff9595;
+}
+
+.new-element a:link,
+.new-element a:visited,
+.new-element a:hover {
+  text-decoration: underline;
+}
+
+.new-element a:hover {
+  color: black !important;
+}
+
+#btn-interval {
+  border: none;
+  background: none;
+  color: #222222;
+  cursor: pointer;
+  display: inline-block;
+  width: 47px;
+  height: 47px;
+}
+
+/*
+  576px for portrait phones
+  768px for tablets
+  992px for laptops
+  1200px for large devices
+
+  sm 640px
+  md 768px
+  lg 1024px
+  xl 1280px
+  2xl 1536px
+*/
+
+@media (min-width: 992px) {
+  header {
+    width: 95vw;
+    max-width: 1700px;
+    margin: 20px auto 30px auto;
+  }
+
+  #parent-container {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px 20px;
+    width: 95vw;
+    max-width: 1700px;
+    margin: 0 auto;
+    margin-bottom: 30px;
+  }
+
+  .container {
+    width: 48%;
+  }
+
+  .container .article {
+    flex-flow: row;
+    column-gap: 10px;
+    font-size: 1rem;
+  }
+  
+  .container .article .details {
+    margin-bottom: 2px;
+    font-size: 1rem;
+    min-width: 234px;
+  }
+  
+  .container .article .details .date {
+    order: 1;
+    flex-grow: 1;
+    text-align: left;
+  }
+  
+  .container .article .details .price {
+    order: 2;
+    flex-grow: 1;
+    text-align: right;
+  }
+  
+  .container .article .title {
+    flex-grow: 1;
+    height: 20px;
+    overflow: hidden;
+  }
+}

@@ -1,0 +1,10 @@
+version: '3.7'
+
+services:
+    flask:
+        build: ./
+        working_dir: /MLScraper
+        volumes:
+            - ./:/MLScraper
+        command: python3 app.py
+        restart: on-failure
