@@ -13,21 +13,25 @@ class Scrapper:
         self.sleep_time = 30
         self.managers = [
             Manager('fire emblem ds'),
-            Manager('animal crossing ds'),
+            #Manager('animal crossing ds'),
             Manager('pokemon ds'),
-            Manager('zelda ds'),
+            #Manager('zelda ds'),
             Manager('nintendo ds', category = Category.consolas),
             Manager('ps vita', category = Category.consolas),
-            Manager('psp', category = Category.consolas),
-            Manager('game boy', category = Category.consolas),
+            #Manager('psp', category = Category.consolas),
+            #Manager('game boy', category = Category.consolas),
             Manager('wii', category = Category.consolas),
             #Manager('juegos ds', category = Category.videojuegos),
-            #Manager('pokemon nintendo switch'),
+            Manager('pokemon nintendo switch'),
+            Manager('mario nintendo switch'),
+            Manager('zelda nintendo switch'),
+            Manager('dock nintendo switch'),
+            Manager('cargador nintendo switch'),
             #Manager('wii', category = Category.videojuegos),
-            #Manager('nintendo switch', category = Category.consolas),
+            Manager('nintendo switch', category = Category.consolas),
             #Manager('nintendo 64', category = Category.consolas),
-        ]      
-        self.caller = caller  
+        ] 
+        self.caller = caller
 
 
     def get_list(self):
