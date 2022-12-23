@@ -11,5 +11,6 @@ RUN     pip install -r ${REQUIEREMENTS}
 COPY    . .
 
 EXPOSE  80
+EXPOSE  443
 
-CMD     python app.py
+CMD     python3.10 app.py
