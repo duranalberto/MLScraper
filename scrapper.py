@@ -1,60 +1,37 @@
 import asyncio
-import json
-import time
-import requests
+from json import dumps as json_dumps
+from time import time
+from requests import post
 
-from secret import apiToken, chatID
-from manager import Manager
-from models.Category import Category
+from provider.generator import get_motors
+from scraper.motor import Motor
 
+from utils.secret import apiToken, chatID
 
 class Scrapper:
     def __init__(self, caller = None):
-        self.sleep_time = 60
-        self.managers = [
-            Manager('fire emblem ds'),
-            Manager('zelda ds'),
-            Manager('pokemon ds'),
-            Manager('nintendo ds', category = Category.consolas),
-            Manager('nintendo switch', category = Category.consolas),
-            Manager('ps vita', category = Category.consolas),
-            Manager('wii', category = Category.consolas),
-            Manager('pokemon nintendo switch'),
-            Manager('mario nintendo switch'),
-            Manager('zelda nintendo switch'),
-            Manager('smash switch'),
-            Manager('joycon'),
-            Manager('dock nintendo switch'),
-            Manager('cargador nintendo switch'),
-            Manager('animal crossing ds'),
-            #Manager('jersey atlas')
-            #Manager('psp', category = Category.consolas),
-            #Manager('game boy', category = Category.consolas),
-            #Manager('juegos ds', category = Category.videojuegos),
-            #Manager('wii', category = Category.videojuegos),
-            #Manager('nintendo 64', category = Category.consolas),
-        ] 
+        self.sleep_time = 50
+        self.motors: list[Motor] = get_motors()
         self.caller = caller
 
-
     def get_list(self):
-        return [{'title':element.search_term,'elements':element.active.get_list()} for element in self.managers]
+        return [{'title':element.search_term,'elements':element.active.get_list()} for element in self.motors]
 
 
-    async def scrape(self):
+    async def run(self):
         while True:
-            start_time = time.time()
+            start_time = time()
             tasks = []
 
-            for manager in self.managers:
-                task = asyncio.create_task(manager.scrape(caller = self.broadcast_new_element, silent = True))
+            for motor in self.motors:
+                task = asyncio.create_task(motor.scrape(caller = self.broadcast_new_element, silent = True))
                 tasks.append(task)
             
             await asyncio.gather(*tasks)
-            time_difference = time.time() - start_time
+            time_difference = time() - start_time
             await self.broadcast_scrape_finished(f'Scraping time: %.2f seconds.' % time_difference)
             await asyncio.sleep(self.sleep_time)
-    
+
 
     async def broadcast_new_element(self, element):
         response = {
@@ -63,16 +40,16 @@ class Scrapper:
         }
         self.send_to_telegram(element)
         if self.caller is not None:
-            await self.caller(json.dumps(response))
+            await self.caller(json_dumps(response))
 
-    
+
     async def broadcast_scrape_finished(self, element: str):
         response = {
             'message': 'scrape status',
             'payload': element
         }
         if self.caller is not None:
-            await self.caller(json.dumps(response))
+            await self.caller(json_dumps(response))
 
 
     def send_to_telegram(self, element):
@@ -81,10 +58,11 @@ class Scrapper:
         apiURL = f'https://api.telegram.org/bot{apiToken}/sendMessage'
 
         try:
-            requests.post(apiURL, json={'chat_id': chatID, 'parse_mode': 'html', 'text': message})
+            post(apiURL, json={'chat_id': chatID, 'parse_mode': 'html', 'text': message})
         except Exception as e:
             print(e)
-    
+
+
     def __formating_element(self, element):
         search_term = element['search_term']
         title = element['title']
@@ -100,6 +78,6 @@ if __name__ == '__main__':
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(scraper.scrape())
+        loop.run_until_complete(scraper.run())
     except KeyboardInterrupt:
         pass

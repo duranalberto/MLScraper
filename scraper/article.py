@@ -1,14 +1,14 @@
-from .Status import Status
-import datetime as datelib
+from datetime import datetime as datatime_lib
+from .status import Status
 prefix = 'https://articulo.mercadolibre.com.mx/'
 
 class Article:
     def __init__(self, search_term, identifier, title, price, datetime = None,  status: Status = Status.none):
         self.search_term = search_term
-        self.identifier = identifier if identifier is not None else 'ABC-1234567890'
+        self.identifier = identifier
         self.title = title
         self.price = price
-        self.datetime = datetime if datetime else str(datelib.datetime.now())
+        self.datetime = datetime if datetime else str(datatime_lib.now())
         self.status = status
     
     def __str__(self):
@@ -48,8 +48,6 @@ class Article:
 
     @staticmethod
     def create(args: dict):
-        if not isinstance(args, dict):
-            return None
         if not Article.is_valid_args(args):
             return None
         if not 'datetime' in args:
