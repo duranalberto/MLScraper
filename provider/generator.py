@@ -1,30 +1,35 @@
-from .mercado_libre.motor import MercadoLibre, Category
+from .mercado_libre.motor import MercadoLibre as ML, Category
 from scraper.motor import Motor
 
 
 def get_motors() -> list[Motor]:
     return [
-        MercadoLibre('fire emblem ds'),
-        MercadoLibre('zelda ds'),
-        MercadoLibre('pokemon ds'),
-        MercadoLibre('nintendo ds', category = Category.consolas),
-        MercadoLibre('nintendo switch', category = Category.consolas),
-        #Manager('ps vita', category = Category.consolas),
-        MercadoLibre('wii', category = Category.consolas),
-        MercadoLibre('pokemon nintendo switch'),
-        MercadoLibre('mario nintendo switch'),
-        MercadoLibre('zelda nintendo switch'),
-        MercadoLibre('smash switch'),
-        MercadoLibre('joycon'),
-        MercadoLibre('dock nintendo switch'),
-        MercadoLibre('cargador nintendo switch'),
-        MercadoLibre('animal crossing ds'),
-        MercadoLibre('amiibo'),
-        #Manager('jersey atlas')
-        #Manager('psp', category = Category.consolas),
-        #Manager('game boy', category = Category.consolas),
-        #Manager('juegos ds', category = Category.videojuegos),
-        #Manager('wii', category = Category.videojuegos),
-        #Manager('nintendo 64', category = Category.consolas),
+        ML('fire emblem ds'),
+        ML('zelda ds'),
+        ML('pokemon ds'),
+        ML('nintendo ds', category = Category.consolas),
+        ML('nintendo switch', category = Category.consolas),
+        ML('wii', category = Category.consolas),
+        ML('pokemon nintendo switch'),
+        ML('mario nintendo switch'),
+        ML('zelda nintendo switch'),
+        ML('smash switch'),
+        ML('joycon'),
+        ML('dock nintendo switch'),
+        ML('cargador nintendo switch'),
+        ML('animal crossing ds'),
+        ML('amiibo'),
+        ML('atlas', category=Category.deportes_jersey),
+        #ML('ps vita', category = Category.consolas),
+        #ML('jersey atlas')
+        #ML('psp', category = Category.consolas),
+        #ML('game boy', category = Category.consolas),
+        #ML('juegos ds', category = Category.videojuegos),
+        #ML('wii', category = Category.videojuegos),
+        #ML('nintendo 64', category = Category.consolas),
     ]
     
+def _get_motors() -> list[Motor]:
+    return [
+        ML('fire emblem ds'),
+    ]

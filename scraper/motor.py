@@ -32,7 +32,7 @@ class Motor(ABC):
                         items, url = self.scrape_page(body)
                         for item in items:
                             article, is_new = self.save(item)
-                            if isinstance(article, Article):
+                            if self.is_article(article):
                                 results.append(article)
                                 if is_new and caller is not None:
                                     await caller(article.dump())
@@ -73,8 +73,8 @@ class Motor(ABC):
 
     def save(self, article: dict | Article, to_status: Status = Status.none, at_beginning = True):
         is_new = False
-        if not isinstance(article, Article):
-            article = Article.create(article)
+        if not self.is_article(article):
+            article = self.create_article(article)
         if article is None:
             return None, is_new
         status = to_status
@@ -85,13 +85,20 @@ class Motor(ABC):
             deleted = self.finished.delete(article)
             at_beginning = at_beginning if deleted is None else False
             added = self.active.add(article if deleted is None else deleted, at_beginning)
-            if deleted is None and isinstance(added, Article):
+            if deleted is None and self.is_article(added):
                 is_new = True
         elif status == Status.finished:
             deleted = self.active.delete(article)
             self.finished.add(article if deleted is None else deleted)
         return article, is_new
 
+    @abstractmethod
+    def is_article(self, article) -> bool:
+        pass
+
+    @abstractmethod
+    def create_article(self, article: dict) -> Article:
+        pass
 
     def load_from_file(self):
         json_array = read_json_file(self.file_name)

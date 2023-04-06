@@ -1,15 +1,12 @@
 from bs4 import BeautifulSoup
-from enum import Enum
 
 from scraper.motor import Motor
-
-class Category(Enum):
-    none = ''
-    consolas = 'consolas'
-    videojuegos = 'videojuegos'
+from .article import Article
+from .search_utils import Category
+from .search_utils import construct_search_url, get_identifier
 
 class MercadoLibre(Motor):
-    def __init__(self, search_term: str, category: Category = Category.none):
+    def __init__(self, search_term: str, category: Category = Category.consolas_videojuegos):
         super().__init__(search_term, construct_search_url(search_term, category))
 
 
@@ -35,23 +32,9 @@ class MercadoLibre(Motor):
             pass
         
         return items, next_url
+    
+    def is_article(self, article) -> bool:
+        return isinstance(article, Article)
 
-url_article_prefix = 'https://articulo.mercadolibre.com.mx/'
-url_search = 'https://listado.mercadolibre.com.mx/consolas-videojuegos/|0|usado/|1|_NoIndex_True'
-
-
-def get_identifier(url: str) -> str:
-    if not url:
-        return ''
-    if url.startswith(url_article_prefix):
-        url = url[len(url_article_prefix):]
-    pre_url = url[:url.find('-') + 1]
-    post_url = url[len(pre_url):]
-    return pre_url + post_url[:post_url.find('-')]
-
-def construct_url_from_identifier(identifier: str) -> str:
-    return url_article_prefix + identifier
-
-def construct_search_url(search_term: str, category: Category = Category.none) -> str:
-    url = url_search.replace('|0|', category.value + '/' if category is not Category.none else '')
-    return url.replace('|1|', search_term.replace(' ', '-'))
+    def create_article(self, article: dict) -> Article:
+        return Article.create(article)
