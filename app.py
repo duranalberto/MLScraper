@@ -1,6 +1,6 @@
 from typing import List
-from uvicorn import run as uvicorn_run
-from asyncio import create_task as asyncio_create_task
+import uvicorn
+import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -40,8 +40,8 @@ class ConnectionManager:
 
 
 app = FastAPI()
-connection = ConnectionManager()
-scrapper = Scrapper(connection.broadcast)
+manager = ConnectionManager()
+scrapper = Scrapper(manager.broadcast)
 
 
 @app.get("/api/search")
@@ -51,21 +51,20 @@ def search():
 
 @app.websocket("/ws/")
 async def websocket_endpoint(websocket: WebSocket):
-    await connection.connect(websocket)
+    await manager.connect(websocket)
 
 
 @app.on_event('startup')
 async def initial_task():
-    asyncio_create_task(scrapper.run())
+    asyncio.create_task(scrapper.scrape())
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    connection.disconnect_all()
+    manager.disconnect_all()
     print('Good bye')
-
 
 app.mount("/", StaticFiles(directory="static",html = True), name="static")
 
 if __name__ == "__main__":
-    uvicorn_run(app, host="0.0.0.0", port=80, loop='asyncio')
+    uvicorn.run(app, host="0.0.0.0", port=80, loop='asyncio')
