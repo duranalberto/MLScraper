@@ -87,6 +87,8 @@ class Motor(ABC):
             added = self.active.add(article if deleted is None else deleted, at_beginning)
             if deleted is None and self.is_article(added):
                 is_new = True
+            else:
+                self.active.update(article)
         elif status == Status.finished:
             deleted = self.active.delete(article)
             self.finished.add(article if deleted is None else deleted)

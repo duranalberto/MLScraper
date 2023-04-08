@@ -2,7 +2,7 @@ from .mercado_libre.motor import MercadoLibre as ML, Category
 from scraper.motor import Motor
 
 
-def get_motors() -> list[Motor]:
+def _get_motors() -> list[Motor]:
     return [
         ML('fire emblem ds'),
         ML('zelda ds'),
@@ -29,7 +29,7 @@ def get_motors() -> list[Motor]:
         #ML('nintendo 64', category = Category.consolas),
     ]
     
-def _get_motors() -> list[Motor]:
+def get_motors() -> list[Motor]:
     return [
         ML('fire emblem ds'),
     ]
