@@ -1,13 +1,14 @@
 from scraper.article import Article as BaseArticle
 from scraper.status import Status
 from .search_utils import construct_url_from_identifier
+import json
 
 class Article(BaseArticle):
     def __str__(self):
         return '[' + str(self.datetime)  + '] - ' + construct_url_from_identifier(self.identifier) + '  ->  ' + self.title + '  $' + self.price + ' datetime ' + self.datetime
     
     def dump(self) -> dict():
-        return {
+        dump = {
                 'search_term': self.search_term,
                 'url': construct_url_from_identifier(self.identifier),
                 'identifier': self.identifier,
@@ -16,8 +17,11 @@ class Article(BaseArticle):
                 'datetime': str(self.datetime),
                 'last_updated': self.last_updated,
                 'status': self.status,
-                'history': [ah.dump() for ah in self.history]
                }
+        dump_history = [ah.dump() for ah in self.history]
+        if len(dump_history) > 0:
+            dump['history'] = dump_history
+        return dump 
     
     def is_valid_args(args: dict):
         if not isinstance(args, dict):

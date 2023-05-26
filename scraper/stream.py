@@ -27,9 +27,11 @@ class Stream:
                 return article
         return None
     
-    def update(self, article: Article):
+    def update(self, article: Article) -> Article:
         if article and article in self._list:
-            self._list[self._list.index(article)].update({'title': article.title, 'price': article.price})
+            was_updated = self._list[self._list.index(article)].update({'title': article.title, 'price': article.price})
+            return self._list[self._list.index(article)] if was_updated else None
+        return None
 
     def extend(self, _list):
         for article in _list:

@@ -2,21 +2,23 @@ from .mercado_libre.motor import MercadoLibre as ML, Category
 from scraper.motor import Motor
 
 
-def _get_motors() -> list[Motor]:
+def get_motors() -> list[Motor]:
     return [
-        ML('fire emblem ds'),
+        #ML('fire emblem ds'),
         ML('zelda ds'),
         ML('pokemon ds'),
         ML('nintendo ds', category = Category.consolas),
         ML('nintendo switch', category = Category.consolas),
-        ML('wii', category = Category.consolas),
+        ML('lote juegos nintendo ds', category = Category.videojuegos),
+        ML('lote juegos nintendo switch', category = Category.videojuegos),
+        #ML('wii', category = Category.consolas),
         ML('pokemon nintendo switch'),
-        ML('mario nintendo switch'),
-        ML('zelda nintendo switch'),
-        ML('smash switch'),
-        ML('joycon'),
-        ML('dock nintendo switch'),
-        ML('cargador nintendo switch'),
+        #ML('mario nintendo switch'),
+        #ML('zelda nintendo switch'),
+        #ML('smash switch'),
+        #ML('joycon'),
+        #ML('dock nintendo switch'),
+        #ML('cargador nintendo switch'),
         ML('animal crossing ds'),
         ML('amiibo'),
         ML('atlas', category=Category.deportes_jersey),
@@ -29,7 +31,9 @@ def _get_motors() -> list[Motor]:
         #ML('nintendo 64', category = Category.consolas),
     ]
     
-def get_motors() -> list[Motor]:
+def _get_motors() -> list[Motor]:
     return [
-        ML('fire emblem ds'),
+        ML('amiibo'),
+        #ML('lote juegos nintendo ds', category = Category.videojuegos),
+        #ML('lote juegos nintendo switch', category = Category.videojuegos)
     ]

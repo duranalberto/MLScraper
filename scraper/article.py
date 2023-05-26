@@ -4,6 +4,8 @@ from typing import List
 
 from .status import Status
 
+import json
+
 class ArticleHistory:
     def __init__(self, datetime: str = None, title: str = None, price: str = None):
         self.datetime = datetime
@@ -26,9 +28,8 @@ class ArticleHistory:
     def create(args: dict):
         if(args is None):
             return None
-        if('datetime' not in args or args['datetime'] is None):
-            args['datetime'] = str(datatime_lib.now())
-        is_valid = 'title' in args or 'price' in args
+        
+        is_valid = ('datetime' in args and args['datetime'] is not None) and ('title' in args or 'price' in args)
         title = args['title'] if 'title' in args else None
         price = args['price'] if 'price' in args else None
         return ArticleHistory(datetime= args['datetime'], title= title, price= price) if is_valid else None
@@ -59,17 +60,24 @@ class Article(ABC):
             return self.identifier == other.identifier
         return NotImplemented
 
-    def load_history(self, to_load) -> List[ArticleHistory]:
+    def load_history(self, to_load, fix: bool= False) -> List[ArticleHistory]:
         history = list()
+
         if to_load is not None:
             for e in to_load:
                 ah = ArticleHistory.create(e)
                 if ah is not None:
                     history.append(ah)
+        # TODO: This is a fix to update files, it should be added when the data is created
+        if fix:
+            if len(history) == 1:
+                history[0].datetime = self.datetime
+            elif len(history) > 1:
+                history.sort(key=lambda x: x.datetime, reverse=True)
+                history[-1].datetime = self.datetime
         return history
 
-    def update(self, to_update: dict, testing = False) -> bool:
-        #print(self.identifier + ' ' + str(to_update))
+    def update(self, to_update: dict) -> bool:
         if('title' not in to_update and 'price' not in to_update):
             return False
         data = {}
@@ -80,9 +88,11 @@ class Article(ABC):
             data['price'] = self.price
             self.price = to_update['price']
         if(len(data) > 0):
+            is_first_update = len(self.history) == 0
+            data['datetime'] = self.datetime if is_first_update else str(datatime_lib.now())
             ah = ArticleHistory.create(data)
             if(ah is not None):
-                self.history.append(ah)
+                self.history.insert(0, ah)
                 self.last_updated = ah.datetime
                 return True
         return False

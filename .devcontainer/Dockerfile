@@ -17,6 +17,7 @@ RUN     apt -y update
 RUN     apt -y install git
 RUN     git config --global user.name "Azlbert"
 RUN     git config --global user.email agzlbert@gmail.com
+RUN     git config --global core.editor "code --wait"
 
 # Copy python requirements to the docker container and install
 COPY    ../requirements.txt .
