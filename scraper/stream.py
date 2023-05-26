@@ -1,10 +1,11 @@
+from typing import List
 from .status import Status
 from .article import Article
 
 class Stream:
     def __init__(self, status: Status = Status.none, _list = None):
         self.status = status
-        self._list = _list if _list else []
+        self._list: List[Article] = _list if _list else []
 
     def __bool__(self):
         return len(self._list) > 0
@@ -24,6 +25,12 @@ class Stream:
                 else:
                     self._list.append(article)
                 return article
+        return None
+    
+    def update(self, article: Article) -> Article:
+        if article and article in self._list:
+            was_updated = self._list[self._list.index(article)].update({'title': article.title, 'price': article.price})
+            return self._list[self._list.index(article)] if was_updated else None
         return None
 
     def extend(self, _list):
