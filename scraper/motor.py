@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from aiohttp import ClientSession
 from json import dumps as json_dumps
+from traceback import format_exc
 
 from .stream import Stream
 from .article import Article
@@ -30,13 +31,11 @@ class Motor(ABC):
                         body = await resp.text()
                         items, url = self.scrape_page(body)
                         for item in items:
-                            article, is_new, is_updated = self.save(item)
+                            article, is_new = self.save(item)
                             if self.is_article(article):
                                 results.append(article)
                                 if is_new and caller is not None:
-                                    await caller(broadcast_type='new_element', element=article.dump())
-                                if is_updated and caller is not None:
-                                    await caller(broadcast_type='is_updated', element=article.dump())
+                                    await caller(article.dump())
             if len(results) > 1:
                 if not silent:
                     print('Total articles recorded for ' + self.search_term + ': ' + str(len(results)))
@@ -46,6 +45,7 @@ class Motor(ABC):
                 await self.save_to_file()
         except Exception:
             print("Loading for " + self.search_term + " failed!")
+            print(format_exc())
 
 
     @abstractmethod
@@ -73,7 +73,6 @@ class Motor(ABC):
 
     def save(self, article: dict | Article, to_status: Status = Status.none, at_beginning = True):
         is_new = False
-        is_updated = False
         if not self.is_article(article):
             article = self.create_article(article)
         if article is None:
@@ -88,15 +87,10 @@ class Motor(ABC):
             added = self.active.add(article if deleted is None else deleted, at_beginning)
             if deleted is None and self.is_article(added):
                 is_new = True
-            else:
-                article_updated = self.active.update(article)
-                if isinstance(article_updated, Article):
-                    article = article_updated
-                    is_updated = True
         elif status == Status.finished:
             deleted = self.active.delete(article)
             self.finished.add(article if deleted is None else deleted)
-        return article, is_new, is_updated
+        return article, is_new
 
     @abstractmethod
     def is_article(self, article) -> bool:

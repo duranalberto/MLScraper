@@ -1,27 +1,21 @@
 from scraper.article import Article as BaseArticle
 from scraper.status import Status
 from .search_utils import construct_url_from_identifier
-import json
 
 class Article(BaseArticle):
     def __str__(self):
-        return '[' + str(self.datetime)  + '] - ' + construct_url_from_identifier(self.identifier) + '  ->  ' + self.title + '  $' + self.price + ' datetime ' + self.datetime
+        return '[' + str(self.datetime)  + '] - ' + construct_url_from_identifier(self.identifier) + '  ->  ' + self.title + '  $' + self.price
     
     def dump(self) -> dict():
-        dump = {
+        return {
                 'search_term': self.search_term,
                 'url': construct_url_from_identifier(self.identifier),
                 'identifier': self.identifier,
                 'title': self.title,
                 'price': self.price,
                 'datetime': str(self.datetime),
-                'last_updated': self.last_updated,
-                'status': self.status,
+                'status': self.status
                }
-        dump_history = [ah.dump() for ah in self.history]
-        if len(dump_history) > 0:
-            dump['history'] = dump_history
-        return dump 
     
     def is_valid_args(args: dict):
         if not isinstance(args, dict):
@@ -37,11 +31,6 @@ class Article(BaseArticle):
             return None
         if not 'datetime' in args:
             args['datetime'] = None
-        if not 'last_updated' in args:
-            args['last_updated'] = None
         if not 'status' in args:
             args['status'] = Status.none
-        if not 'history' in args:
-            args['history'] = None
-        return Article(args['search_term'], args['identifier'], args['title'], args['price'], datetime= args['datetime'],
-                        last_updated= args['last_updated'], status= args['status'], history= args['history'])
+        return Article(args['search_term'], args['identifier'], args['title'], args['price'], args['datetime'], args['status'])
