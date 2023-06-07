@@ -35,15 +35,16 @@ class ArticleHistory:
         return ArticleHistory(datetime= args['datetime'], title= title, price= price) if is_valid else None
 
 class Article(ABC):
-    def __init__(self, search_term, identifier, title, price, datetime = None, last_updated = None, status: Status = Status.none, history: list = list()):
+    def __init__(self, search_term, identifier, title, price, url:str = None, datetime = None, last_updated = None, status: Status = Status.none, history: list = list()):
         self.search_term = search_term
         self.identifier = identifier
         self.title = title
         self.price = price
+        self.url = url
         self.datetime = datetime if datetime else str(datatime_lib.now())
-        self.last_updated = last_updated if last_updated else self.datetime
         self.status = status
         self.history: List[ArticleHistory] = self.load_history(history)
+        self.last_updated = last_updated if last_updated else None
     
     @abstractmethod
     def __str__(self):
@@ -89,11 +90,11 @@ class Article(ABC):
             self.price = to_update['price']
         if(len(data) > 0):
             is_first_update = len(self.history) == 0
-            data['datetime'] = self.datetime if is_first_update else str(datatime_lib.now())
+            data['datetime'] = self.datetime if is_first_update else self.last_updated
             ah = ArticleHistory.create(data)
             if(ah is not None):
+                self.last_updated = str(datatime_lib.now())
                 self.history.insert(0, ah)
-                self.last_updated = ah.datetime
                 return True
         return False
 

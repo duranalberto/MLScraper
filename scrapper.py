@@ -8,7 +8,7 @@ from utils.telegram import send_new_to_telegram, send_price_drop_to_telegram
 
 class Scrapper:
     def __init__(self, caller = None):
-        self.sleep_time = 50
+        self.sleep_time = 30
         self.motors: list[Motor] = get_motors()
         self.caller = caller
 
@@ -52,10 +52,17 @@ class Scrapper:
         if(not 'price' in element['history'][0]):
             return
 
-        last_value = float(element['history'][0]['price'].replace(',', ''))
-        new_value = float(element['price'].replace(',', ''))
+        last_value = element['history'][0]['price']
+        if isinstance(last_value, str):
+            last_value = float(last_value.replace(',', ''))
+
+        new_value = element['price']
+        if isinstance(new_value, str):
+            new_value = float(new_value.replace(',', ''))
+
         percent_change = ((new_value - last_value) / abs(last_value)) * 100
-        if percent_change <= -10:
+
+        if percent_change <= -14:
             element['percent_change'] = format(abs(percent_change),'.2f')
             print(element['url'] + '\nPrice of ' + element['title'] + ' - ' +  ' decresed by: ' + element['percent_change'])
             send_price_drop_to_telegram(element)

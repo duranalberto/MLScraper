@@ -9,15 +9,17 @@ from .status import Status
 from utils.file_manager import read_json_file, write_in_file
 from utils.headers import headers
 
+from traceback import format_exc
  
 class Motor(ABC):
-    def __init__(self, search_term: str, url: str):
+    def __init__(self, search_term: str, url: str, debug: bool = True):
         self.search_term = search_term
         self.url = url
         self.file_name = search_term + '.json'
         self.active = Stream(Status.active)
         self.finished = Stream(Status.finished)
         self.load_from_file()
+        self.debug = debug
 
 
     async def scrape(self, caller = None, silent: bool = False):
@@ -27,7 +29,9 @@ class Motor(ABC):
             async with ClientSession() as session:
                 while url is not None:
                     async with session.get(url, headers=headers) as resp:
-                        body = await resp.text()
+                        body = dict()
+                        body['content'] = await resp.text()
+                        body['url'] = url
                         items, url = self.scrape_page(body)
                         for item in items:
                             article, is_new, is_updated = self.save(item)
@@ -46,10 +50,11 @@ class Motor(ABC):
                 await self.save_to_file()
         except Exception:
             print("Loading for " + self.search_term + " failed!")
-
+            if self.debug:
+                print(format_exc())
 
     @abstractmethod
-    def scrape_page(self, body):
+    def scrape_page(self, body: dict()):
         pass
 
 
@@ -77,7 +82,7 @@ class Motor(ABC):
         if not self.is_article(article):
             article = self.create_article(article)
         if article is None:
-            return None, is_new
+            return None, is_new, is_updated
         status = to_status
         if status is Status.none:
             status = article.status if article.status is not Status.none else Status.active
