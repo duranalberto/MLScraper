@@ -11,6 +11,7 @@ class Category(Enum):
     videojuegos = '/consolas-videojuegos/videojuegos'
     consolas_videojuegos = '/consolas-videojuegos'
     deportes_jersey = '/deportes-fitness/futbol'
+    apple_official = 'https://listado.mercadolibre.com.mx/_CustId_527927603_BRAND_9344_NoIndex_True' 
 
 def get_identifier(url: str) -> str:
     if not url:
@@ -25,5 +26,7 @@ def construct_url_from_identifier(identifier: str) -> str:
     return _urls['article_prefix'] + identifier
 
 def construct_search_url(search_term: str, category: Category = Category.none) -> str:
+    if category == Category.apple_official:
+        return Category.apple_official.value
     url = _urls['url_search'].replace('|0|', category.value)
     return url.replace('|1|', search_term.replace(' ', '-'))
