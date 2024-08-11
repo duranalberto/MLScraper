@@ -42,10 +42,10 @@ def _get_motors() -> list[Motor]:
         #ML('nintendo 64', category = Category.consolas),
     ]
     
-def get_motors() -> list[Motor]:
+def __get_motors() -> list[Motor]:
     return [
         #AZ(search_term='apple', seller = Seller.amazon_mx),
-        ML('apple', category=Category.apple_official), 
+        #ML('apple', category=Category.apple_official), 
         AZ(search_term='iphone', seller = Seller.amazon_mx),
         AZ(search_term='ipad', seller = Seller.amazon_mx),
         AZ(search_term='apple watch', seller = Seller.amazon_mx),
@@ -84,4 +84,19 @@ def get_motors() -> list[Motor]:
         #ML('amiibo'),
         #ML('lote juegos nintendo ds', category = Category.videojuegos),
         #ML('lote juegos nintendo switch', category = Category.videojuegos)
+    ]
+
+
+def get_motors() -> list[Motor]:
+    return [
+        AZ(search_term='iphone', seller = Seller.amazon_mx),
+        AZ(search_term='ipad', seller = Seller.amazon_mx),
+        AZ(search_term='apple watch', seller = Seller.amazon_mx),
+        AZ(search_term='airtag', seller = Seller.amazon_mx),
+        AZ(search_term='airpods', seller = Seller.amazon_mx),
+        AZ(search_term='apple tv', seller = Seller.amazon_mx),
+        AZ(search_term='amiibo', seller = Seller.amazon_mx),
+        AZ(search_term='pokemon tcg', seller = Seller.amazon_mx),
+        PH(search_term = 'PH Computadoras', url ='https://www.elpalaciodehierro.com/electronica/computadoras/'),
+        LV(search_term = 'LV Pantallas', url = 'https://www.liverpool.com.mx/tienda/Pantallas/N-Z6GQrU4fZmxjTFXt9XTtjOJ1pgsv3ORca6us58D3tcWUJ8Sz5xDngrfcZXSEmwVj'),
     ]
