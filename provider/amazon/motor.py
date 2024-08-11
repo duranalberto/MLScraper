@@ -1,8 +1,8 @@
 from bs4 import BeautifulSoup
 
 from scraper.motor import Motor
-from .article import Article
-from .search_utils import Seller
+from scraper.article import Article
+from .utils import Seller
 
 from traceback import format_exc
 
@@ -12,15 +12,12 @@ class Amazon(Motor):
         url = f'https://www.amazon.com.mx/s?k={formated_title}&rh=p_6%3A{seller.value}'
         super().__init__(F'AZ {seller.name} - {search_term}', url)
 
-
     def scrape_page(self, body):
         items = list()
         next_url = None
 
         soup = BeautifulSoup(body['content'], 'html.parser')
-
         root = soup.find('div', class_='s-main-slot s-result-list s-search-results sg-row')
-        #print(soup)
         items_div = root.find_all('div', class_='sg-col-4-of-24 sg-col-4-of-12 s-result-item s-asin sg-col-4-of-16 sg-col s-widget-spacing-small sg-col-4-of-20')
         for item in items_div:
             args = {}

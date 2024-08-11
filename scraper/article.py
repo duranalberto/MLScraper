@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 from datetime import datetime as datatime_lib
 from typing import List
 
@@ -32,7 +31,8 @@ class ArticleHistory:
         price = args['price'] if 'price' in args else None
         return ArticleHistory(datetime= args['datetime'], title= title, price= price) if is_valid else None
 
-class Article(ABC):
+
+class Article:
     def __init__(self, search_term, identifier, title, price, url:str = None, datetime = None, last_updated = None, status: Status = Status.none, history: list = list()):
         self.search_term = search_term
         self.identifier = identifier
@@ -44,9 +44,8 @@ class Article(ABC):
         self.history: List[ArticleHistory] = self.load_history(history)
         self.last_updated = last_updated if last_updated else None
     
-    @abstractmethod
     def __str__(self):
-        pass
+        return '[' + str(self.datetime)  + '] - ' + 'to_add' + '  ->  ' + self.title + '  $' + self.price + ' datetime ' + self.datetime
     
     def __repr__(self):
         return self.identifier
@@ -95,17 +94,42 @@ class Article(ABC):
                 self.history.insert(0, ah)
                 return True
         return False
-
-    @abstractmethod
+    
     def dump(self) -> dict:
-        pass
+        dump = {
+                'search_term': self.search_term,
+                'url': self.url,
+                'identifier': self.identifier,
+                'title': self.title,
+                'price': self.price,
+                'datetime': str(self.datetime),
+                'status': self.status,
+               }
+        dump_history = [ah.dump() for ah in self.history]
+        if len(dump_history) > 0:
+            dump['last_updated'] = self.last_updated
+            dump['history'] = dump_history
+        return dump 
     
     @staticmethod
-    @abstractmethod
     def is_valid_args(args: dict):
-        pass
+        if not isinstance(args, dict):
+            return None
+        if not 'search_term' in args or not 'url' in args or not 'identifier' in args or not 'title' in args  or not 'price' in args:
+            return False
+        return True
 
     @staticmethod
-    @abstractmethod
     def create(args: dict):
-        pass
+        if not Article.is_valid_args(args):
+            return None
+        if not 'datetime' in args:
+            args['datetime'] = None
+        if not 'last_updated' in args:
+            args['last_updated'] = None
+        if not 'status' in args:
+            args['status'] = Status.none
+        if not 'history' in args:
+            args['history'] = None
+        return Article(args['search_term'], args['identifier'], args['title'], args['price'], url= args['url'], datetime= args['datetime'],
+                        last_updated= args['last_updated'], status= args['status'], history= args['history'])

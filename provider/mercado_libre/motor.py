@@ -2,13 +2,12 @@ from bs4 import BeautifulSoup
 
 from scraper.motor import Motor
 from .article import Article
-from .search_utils import Category
-from .search_utils import construct_search_url, get_identifier
+from .utils import Category
+from .utils import construct_search_url, get_identifier, construct_url_from_identifier
 
 class MercadoLibre(Motor):
     def __init__(self, search_term: str, category: Category = Category.consolas_videojuegos):
         super().__init__(search_term, construct_search_url(search_term, category))
-
 
     def scrape_page(self, body):
         items = list()
@@ -23,6 +22,7 @@ class MercadoLibre(Motor):
             args['title']       = item.find("h2", class_="ui-search-item__title", text=True).text
             args['price']       = item.find("span", class_="andes-money-amount__fraction", text=True).text
             args['search_term'] = self.search_term
+            args['url']         = construct_url_from_identifier(args['identifier'])
             items.append(args)
         try:
             next_a_tag = root.find("li", class_="andes-pagination__button andes-pagination__button--next").find("a", class_="andes-pagination__link", href=True)

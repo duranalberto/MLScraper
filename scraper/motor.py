@@ -21,7 +21,6 @@ class Motor(ABC):
         self.load_from_file()
         self.debug = debug
 
-
     async def scrape(self, caller = None, silent: bool = False):
         results = list()
         url = self.url
@@ -57,7 +56,6 @@ class Motor(ABC):
     def scrape_page(self, body: dict):
         pass
 
-
     def print_compare(self):
         print('\nResume for: ' + self.search_term)
         print('Elements in file:    ' + str(len(self.active + self.finished)))
@@ -66,15 +64,12 @@ class Motor(ABC):
         for article in self.active.get_list():
             print(article)
 
-
     def get_all(self):
         return self.active + self.finished
-
 
     def clear_all_streams(self):
         self.active.clear()
         self.finished.clear()
-
 
     def save(self, article: dict | Article, to_status: Status = Status.none, at_beginning = True):
         is_new = False
@@ -116,7 +111,6 @@ class Motor(ABC):
         for json_object in json_array:
             json_object['search_term'] =  self.search_term
             self.save(json_object, at_beginning = False)
-
 
     async def save_to_file(self):
         self.active.order_by_time()

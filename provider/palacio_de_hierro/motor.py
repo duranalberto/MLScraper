@@ -1,12 +1,11 @@
 from bs4 import BeautifulSoup
 
 from scraper.motor import Motor
-from .article import Article
+from scraper.article import Article
 
 class PalacioDeHierro(Motor):
     def __init__(self, search_term: str, url: str):
         super().__init__(search_term, url)
-
 
     def scrape_page(self, body):
         items = list()
