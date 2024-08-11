@@ -8,7 +8,7 @@ from utils.telegram import send_new_to_telegram, send_price_drop_to_telegram
 
 class Scrapper:
     def __init__(self, caller = None):
-        self.sleep_time = 30
+        self.sleep_time = 900
         self.motors: list[Motor] = get_motors()
         self.caller = caller
 
@@ -31,13 +31,15 @@ class Scrapper:
             await asyncio.sleep(self.sleep_time)
 
 
-    async def _broadcast(self, broadcast_type: str, element: dict(), msj: str = ''):
+    async def _broadcast(self, broadcast_type: str, element: dict, msj: str = ''):
+        if False:
+            return
         if broadcast_type == 'new_element':
             await self._broadcast_new_element(element)
         elif broadcast_type == 'is_updated':
             await self._broadcast_is_updated(element)
 
-    async def _broadcast_new_element(self, element: dict()):
+    async def _broadcast_new_element(self, element: dict):
         response = {
             'message': 'new element',
             'payload': element
@@ -48,7 +50,7 @@ class Scrapper:
 
 
     #TODO Simplify the element dict
-    async def _broadcast_is_updated(self, element: dict()):
+    async def _broadcast_is_updated(self, element: dict):
         if(not 'price' in element['history'][0]):
             return
 

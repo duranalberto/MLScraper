@@ -14,18 +14,18 @@ class MercadoLibre(Motor):
         items = list()
         next_url = None
         soup = BeautifulSoup(body['content'], 'html.parser')
-        root = soup.find("section", class_="ui-search-results ui-search-results--without-disclaimer shops__search-results")
-        item_ol = root.find("ol", class_="ui-search-layout ui-search-layout--stack shops__layout").find_all("li", class_="ui-search-layout__item shops__layout-item")
+        root = soup.find("section", class_="ui-search-results ui-search-results--without-disclaimer")
+        item_ol = root.find("ol").find_all("li")
         for item in item_ol:
-            item_a_tag = item.find("a", class_="ui-search-item__group__element shops__items-group-details ui-search-link", href=True)
+            item_a_tag = item.find("a", class_="ui-search-item__group__element ui-search-link__title-card ui-search-link", href=True)
             args = {}
             args['identifier']  = get_identifier(item_a_tag['href'])
-            args['title']       = item.find("h2", class_="ui-search-item__title shops__item-title", text=True).text
+            args['title']       = item.find("h2", class_="ui-search-item__title", text=True).text
             args['price']       = item.find("span", class_="andes-money-amount__fraction", text=True).text
             args['search_term'] = self.search_term
             items.append(args)
         try:
-            next_a_tag = root.find("li", class_="andes-pagination__button andes-pagination__button--next shops__pagination-button").find("a", class_="andes-pagination__link shops__pagination-link ui-search-link", href=True)
+            next_a_tag = root.find("li", class_="andes-pagination__button andes-pagination__button--next").find("a", class_="andes-pagination__link", href=True)
             next_url = next_a_tag['href']
         except:
             pass
