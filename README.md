@@ -1,2 +1,2 @@
 # MLScraper
-Mercado Libre scraper
+Scraper for MercadoLibre, Amazon, Liverpool and Palacio de Hierro

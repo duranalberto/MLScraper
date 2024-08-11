@@ -4,8 +4,6 @@ from typing import List
 
 from .status import Status
 
-import json
-
 class ArticleHistory:
     def __init__(self, datetime: str = None, title: str = None, price: str = None):
         self.datetime = datetime
@@ -15,7 +13,7 @@ class ArticleHistory:
     def __str__(self):
         return '[' + str(self.datetime)  + '] - ' + self.title + '  $' + self.price
     
-    def dump(self) -> dict():
+    def dump(self) -> dict:
         e = {}
         e['datetime'] = self.datetime
         if(self.title is not None):

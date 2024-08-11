@@ -5,13 +5,13 @@ from .secret import apiToken, chatID
 #https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>&text=Hello%20World
 apiURL = f'https://api.telegram.org/bot{apiToken}/sendMessage'
 
-def send_new_to_telegram(element: dict()):
+def send_new_to_telegram(element: dict):
     message = __formating_new(element)
     _send_to_telegram(message)
 
     
 
-def send_price_drop_to_telegram(element: dict()):
+def send_price_drop_to_telegram(element: dict):
     message = __formating_price_drop(element)
     _send_to_telegram(message)
 
@@ -23,7 +23,7 @@ def _send_to_telegram(message):
         print(e)
 
 
-def __formating_new(element: dict()):
+def __formating_new(element: dict):
     search_term = element['search_term']
     title = element['title']
     url = element['url']
@@ -32,7 +32,7 @@ def __formating_new(element: dict()):
     return f'<strong>{search_term}</strong>\n<a href="{url}">{title}</a>\nPrice: ${price} mxn\nTime: {datetime}'
 
 
-def __formating_price_drop(element: dict()):
+def __formating_price_drop(element: dict):
     if not'percent_change' in element or not element['percent_change']:
         return
     search_term = element['search_term']

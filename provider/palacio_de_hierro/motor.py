@@ -14,14 +14,15 @@ class PalacioDeHierro(Motor):
 
         soup = BeautifulSoup(body['content'], 'html.parser')
         root = soup.find("section", class_="l-plp-grid_wrapper")
-        items_div = root.find("div", class_="l-plp-grid_wrapper-products").find_all("div", class_="l-plp-grid_item m-product")
+        items_div = root.find("section", class_="l-plp-grid_wrapper-products").find_all("article", class_="l-plp-grid_item m-product")
         for item in items_div:
             args = {}
-            url = item.find("a", class_="b-product_tile-name").get('href').strip()
+            a = item.find("h3", class_="b-product_tile-name").find("a")
+            url = a.get('href').strip()
             url = f'https://www.elpalaciodehierro.com{url}'
             args['identifier']  = item.attrs["data-pid"].strip()
             args['url']         = url
-            args['title']       = item.find("a", class_="b-product_tile-name", text=True).text.replace('\n', '').strip()
+            args['title']       = a.text.replace('\n', '').strip()
             
             price_parent_tag = item.find("div", class_="b-product_price")
             price_tag = price_parent_tag.find("div", class_="b-product_price-sales m-reduced")

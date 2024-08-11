@@ -54,7 +54,7 @@ class Motor(ABC):
                 print(format_exc())
 
     @abstractmethod
-    def scrape_page(self, body: dict()):
+    def scrape_page(self, body: dict):
         pass
 
 

@@ -1,12 +1,11 @@
 from scraper.article import Article as BaseArticle
 from scraper.status import Status
-import json
 
 class Article(BaseArticle):
     def __str__(self):
         return '[' + str(self.datetime)  + '] - ' + 'to_add' + '  ->  ' + self.title + '  $' + self.price + ' datetime ' + self.datetime
     
-    def dump(self) -> dict():
+    def dump(self) -> dict:
         dump = {
                 'search_term': self.search_term,
                 'url': self.url,
