@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from .status import Status
 from .article import Article
 
@@ -16,7 +16,7 @@ class Stream:
     def __sub__(self, other):
         return list(set(self._list).difference(other))
 
-    def add(self, article: Article, at_beginning = False):
+    def add(self, article: Article, at_beginning = False) -> Optional[Article]:
         if article:
             article.status = self.status
             if not article in self._list:
@@ -27,7 +27,7 @@ class Stream:
                 return article
         return None
     
-    def update(self, article: Article) -> Article:
+    def update(self, article: Article) -> Optional[Article]:
         if article and article in self._list:
             was_updated = self._list[self._list.index(article)].update({'title': article.title, 'price': article.price})
             return self._list[self._list.index(article)] if was_updated else None
@@ -37,7 +37,7 @@ class Stream:
         for article in _list:
             self.add(article)
 
-    def delete(self, article: Article):
+    def delete(self, article: Article) -> Optional[Article]:
         if article in self._list:
             to_remove = self._list[self._list.index(article)]
             self._list.remove(to_remove)

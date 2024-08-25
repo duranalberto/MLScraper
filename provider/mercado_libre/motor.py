@@ -1,7 +1,6 @@
 from bs4 import BeautifulSoup
 
 from scraper.motor import Motor
-from .article import Article
 from .utils import Category
 from .utils import construct_search_url, get_identifier, construct_url_from_identifier
 
@@ -31,9 +30,3 @@ class MercadoLibre(Motor):
             pass
         
         return items, next_url
-    
-    def is_article(self, article) -> bool:
-        return isinstance(article, Article)
-
-    def create_article(self, article: dict) -> Article:
-        return Article.create(article)

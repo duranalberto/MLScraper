@@ -6,3 +6,6 @@ class Status(str, Enum):
     on_hold = 'on_hold'
     finished = 'finished'
     ignoring = 'ignoring'
+
+    def __bool__(self):
+        return self != Status.none

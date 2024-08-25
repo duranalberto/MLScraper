@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from aiohttp import ClientSession
+from asyncio import gather
 from json import dumps as json_dumps
+from typing import Optional, Tuple
 
 from .stream import Stream
 from .article import Article
@@ -22,38 +24,37 @@ class Motor(ABC):
         self.debug = debug
 
     async def scrape(self, caller = None, silent: bool = False):
-        results = list()
+        results = []
         url = self.url
         try:
             async with ClientSession() as session:
-                while url is not None:
+                while url:
                     async with session.get(url, headers=headers) as resp:
-                        body = dict()
-                        body['content'] = await resp.text()
-                        body['url'] = url
+                        body = {'content': await resp.text(), 'url': url}
                         items, url = self.scrape_page(body)
                         for item in items:
                             article, is_new, is_updated = self.save(item)
                             if self.is_article(article):
                                 results.append(article)
-                                if is_new and caller is not None:
+                                if is_new and caller:
                                     await caller(broadcast_type='new_element', element=article.dump())
-                                if is_updated and caller is not None:
+                                if is_updated and caller:
                                     await caller(broadcast_type='is_updated', element=article.dump())
-            if len(results) > 1:
+
+            if results:
                 if not silent:
-                    print('Total articles recorded for ' + self.search_term + ': ' + str(len(results)))
+                    print(f'Total articles recorded for {self.search_term}: {len(results)}')
                 deleted_articles = self.active - results
                 for deleted in deleted_articles:
                     self.save(deleted, to_status = Status.finished)
                 await self.save_to_file()
         except Exception:
-            print("Loading for " + self.search_term + " failed!")
+            print(f"Loading for {self.search_term} failed!")
             if self.debug:
-                print(format_exc())
+                print(format_exc())   
 
     @abstractmethod
-    def scrape_page(self, body: dict):
+    def scrape_page(self, body: dict) -> tuple[list, str]:
         pass
 
     def print_compare(self):
@@ -64,47 +65,44 @@ class Motor(ABC):
         for article in self.active.get_list():
             print(article)
 
-    def get_all(self):
+    def get_all(self) -> Stream:
         return self.active + self.finished
 
     def clear_all_streams(self):
         self.active.clear()
         self.finished.clear()
 
-    def save(self, article: dict | Article, to_status: Status = Status.none, at_beginning = True):
+    def save(self, article: Optional[Article | dict], to_status: Status = Status.none, at_beginning = True) -> Tuple[Optional[Article], bool, bool]:
         is_new = False
         is_updated = False
-        if not self.is_article(article):
-            article = self.create_article(article)
-        if article is None:
-            return None, is_new, is_updated
-        status = to_status
-        if status is Status.none:
-            status = article.status if article.status is not Status.none else Status.active
+        article = article if self.is_article(article) else self.create_article(article)
+
+        if article:
+            status = to_status if to_status else (article.status if article.status else Status.active)
+            
+            match status:
+                case Status.active:
+                    deleted = self.finished.delete(article)
+                    at_beginning = at_beginning if deleted is None else False
+                    added = self.active.add(article if deleted is None else deleted, at_beginning)
+                    if deleted is None and self.is_article(added):
+                        is_new = True
+                    else:
+                        article_updated = self.active.update(article)
+                        if isinstance(article_updated, Article):
+                            article = article_updated
+                            is_updated = True
+                case Status.finished:
+                    deleted = self.active.delete(article)
+                    self.finished.add(article if deleted is None else deleted)
         
-        if status == Status.active:
-            deleted = self.finished.delete(article)
-            at_beginning = at_beginning if deleted is None else False
-            added = self.active.add(article if deleted is None else deleted, at_beginning)
-            if deleted is None and self.is_article(added):
-                is_new = True
-            else:
-                article_updated = self.active.update(article)
-                if isinstance(article_updated, Article):
-                    article = article_updated
-                    is_updated = True
-        elif status == Status.finished:
-            deleted = self.active.delete(article)
-            self.finished.add(article if deleted is None else deleted)
         return article, is_new, is_updated
 
-    @abstractmethod
     def is_article(self, article) -> bool:
-        pass
+        return isinstance(article, Article)
 
-    @abstractmethod
-    def create_article(self, article: dict) -> Article:
-        pass
+    def create_article(self, article: dict) -> Optional[Article]:
+        return Article.create(article)
 
     def load_from_file(self):
         json_array = read_json_file(self.file_name)
