@@ -1,10 +1,9 @@
 from bs4 import BeautifulSoup
+from traceback import format_exc
 
 from scraper.motor import Motor
-from scraper.article import Article
 from .utils import Seller
 
-from traceback import format_exc
 
 class Amazon(Motor):
     def __init__(self, search_term: str, seller: Seller = Seller.none):
@@ -12,7 +11,7 @@ class Amazon(Motor):
         url = f'https://www.amazon.com.mx/s?k={formated_title}&rh=p_6%3A{seller.value}'
         super().__init__(F'AZ {seller.name} - {search_term}', url)
 
-    def scrape_page(self, body):
+    def scrape_page(self, body: dict):
         items = list()
         next_url = None
 
@@ -40,9 +39,3 @@ class Amazon(Motor):
             pass
         
         return items, next_url
-    
-    def is_article(self, article) -> bool:
-        return isinstance(article, Article)
-
-    def create_article(self, article: dict) -> Article:
-        return Article.create(article)

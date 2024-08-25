@@ -45,12 +45,14 @@ class Scrapper:
             'payload': element
         }
         send_new_to_telegram(element)
-        if self.caller is not None:
+        if self.caller:
             await self.caller(json_dumps(response))
 
 
     #TODO Simplify the element dict
     async def _broadcast_is_updated(self, element: dict):
+        if('history' not in element):
+            print(str(element))
         if(not 'price' in element['history'][0]):
             return
 
@@ -75,7 +77,7 @@ class Scrapper:
             'message': 'scrape status',
             'payload': element
         }
-        if self.caller is not None:
+        if self.caller:
             await self.caller(json_dumps(response))
 
 

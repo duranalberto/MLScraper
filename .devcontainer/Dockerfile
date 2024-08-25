@@ -1,5 +1,5 @@
 #The base image for the container 
-FROM    python:3.10.8-slim-buster
+FROM    python:3.12.5-slim
  
 # Keeps Python from generating .pyc files in the container 
 ENV     PYTHONDONTWRITEBYTECODE=1
