@@ -1,5 +1,6 @@
-fastapi             ==  0.112.0
-uvicorn[standard]   ==  0.30.5
-beautifulsoup4      ==  4.12.3
-requests            ==  2.32.3
-aiohttp             ==  3.10.3
+fastapi             ==  0.125.0
+uvicorn[standard]   ==  0.38.0
+beautifulsoup4      ==  4.14.3
+lxml                ==  6.0.2
+requests            ==  2.32.5
+aiohttp             ==  3.13.2

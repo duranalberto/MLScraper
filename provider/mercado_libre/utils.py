@@ -1,7 +1,11 @@
+import re
 from enum import Enum
 
 _urls = {
+    # Standard article base
     'article_prefix': 'https://articulo.mercadolibre.com.mx/',
+    # Catalog item base
+    'catalog_prefix': 'https://www.mercadolibre.com.mx/up/',
     'url_search': 'https://listado.mercadolibre.com.mx|0|/usado/|1|_NoIndex_True'
 }
 
@@ -19,19 +23,39 @@ class Category(Enum):
 def get_identifier(url: str) -> str:
     if not url:
         return ''
-    if url.startswith(_urls['article_prefix']):
-        url = url[len(_urls['article_prefix']):]
-    pre_url = url[:url.find('-') + 1]
-    post_url = url[len(pre_url):]
-    return pre_url + post_url[:post_url.find('-')]
+    
+    # regex finds MLM-123456789 or MLMU123456789
+    match = re.search(r'(MLM-?\d+|MLMU\d+)', url)
+    if match:
+        return match.group(1)
+    
+    return url 
 
 def construct_url_from_identifier(identifier: str) -> str:
-    return _urls['article_prefix'] + identifier
+    """
+    Constructs the URL based on the ID type.
+    MLMU (Catalog) -> https://www.mercadolibre.com.mx/up/MLMU...
+    MLM (Standard) -> https://articulo.mercadolibre.com.mx/MLM...
+    """
+    if not identifier:
+        return ''
+    
+    if identifier.startswith('MLMU'):
+        return f"{_urls['catalog_prefix']}{identifier}"
+    
+    return f"{_urls['article_prefix']}{identifier}"
 
 def construct_search_url(search_term: str, category: Category = Category.none) -> str:
-    if category == Category.apple_official:
-        return Category.apple_official.value
-    if category == Category.iphone_trece_pro_usado:
-        return Category.iphone_trece_pro_usado.value
+    # Check if category is one of the hardcoded URLs
+    hardcoded_categories = [
+        Category.apple_official, 
+        Category.iphone_trece_pro_usado, 
+        Category.iphone_once_pro_usado, 
+        Category.iphone_se_usado
+    ]
+    
+    if category in hardcoded_categories:
+        return category.value
+        
     url = _urls['url_search'].replace('|0|', category.value)
     return url.replace('|1|', search_term.replace(' ', '-'))
