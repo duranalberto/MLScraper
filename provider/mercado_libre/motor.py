@@ -1,8 +1,6 @@
 from bs4 import BeautifulSoup
-
 from scraper.motor import Motor
-from .utils import Category
-from .utils import construct_search_url, get_identifier, construct_url_from_identifier
+from .utils import Category, get_identifier, construct_url_from_identifier, construct_search_url
 
 class MercadoLibre(Motor):
     def __init__(self, search_term: str, category: Category = Category.consolas_videojuegos):
@@ -12,20 +10,56 @@ class MercadoLibre(Motor):
         items = list()
         next_url = None
         soup = BeautifulSoup(body['content'], 'html.parser')
-        root = soup.find("section", class_="ui-search-results ui-search-results--without-disclaimer")
-        item_ol = root.find("ol").find_all("li")
-        for item in item_ol:
-            item_a_tag = item.find("a", class_="ui-search-item__group__element ui-search-link__title-card ui-search-link", href=True)
-            args = {}
-            args['identifier']  = get_identifier(item_a_tag['href'])
-            args['title']       = item.find("h2", class_="ui-search-item__title", text=True).text
-            args['price']       = item.find("span", class_="andes-money-amount__fraction", text=True).text
-            args['search_term'] = self.search_term
-            args['url']         = construct_url_from_identifier(args['identifier'])
-            items.append(args)
+        
+        # Look for the main results container
+        root = soup.find("section", class_="ui-search-results")
+        if not root:
+            return items, None
+
+        # ML uses 'ui-search-layout__item' for search result cards
+        item_li = root.find_all("li", class_="ui-search-layout__item")
+        
+        for item in item_li:
+            try:
+                # In your HTML, the title is inside an <a> tag
+                # which is inside a wrapper (often h2 or div)
+                link_tag = item.find("a", href=True)
+                if not link_tag: continue
+                
+                raw_url = link_tag['href']
+                identifier = get_identifier(raw_url)
+                
+                # If we couldn't find a clean ID, we skip or use raw URL to avoid broken prefixes
+                if not identifier or identifier.startswith('http'):
+                    clean_url = raw_url
+                else:
+                    clean_url = construct_url_from_identifier(identifier)
+
+                # Price extraction
+                price_span = item.find("span", class_="andes-money-amount__fraction")
+                
+                args = {
+                    'identifier': identifier,
+                    'title': link_tag.get_text(strip=True),
+                    'price': price_span.get_text(strip=True) if price_span else "0",
+                    'search_term': self.search_term,
+                    'url': clean_url
+                }
+                items.append(args)
+            except Exception as e:
+                if self.debug: print(f"Error parsing item: {e}")
+                continue
+
+        # Pagination handling
         try:
-            next_a_tag = root.find("li", class_="andes-pagination__button andes-pagination__button--next").find("a", class_="andes-pagination__link", href=True)
-            next_url = next_a_tag['href']
+            next_a = root.find("a", class_="andes-pagination__link", attrs={"title": "Siguiente"})
+            if not next_a:
+                # Fallback for different pagination classes
+                next_li = root.find("li", class_="andes-pagination__button--next")
+                if next_li: next_a = next_li.find("a", href=True)
+            
+            if next_a:
+                next_url = next_a['href']
         except:
             pass
         

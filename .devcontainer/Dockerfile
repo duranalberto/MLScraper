@@ -1,5 +1,5 @@
 #The base image for the container 
-FROM    python:3.12.5-slim
+FROM    python:3.14.2-slim
  
 # Keeps Python from generating .pyc files in the container 
 ENV     PYTHONDONTWRITEBYTECODE=1
@@ -15,7 +15,7 @@ ENV     PYTHONUNBUFFERED=1
  
 RUN     apt -y update
 RUN     apt -y install git
-RUN     git config --global user.name "Azlbert"
+RUN     git config --global user.name "Alberto Duran"
 RUN     git config --global user.email agzlbert@gmail.com
 RUN     git config --global core.editor "code --wait"
 

@@ -1,4 +1,4 @@
-FROM    python:3.12.5-slim
+FROM    python:3.14.2-slim
 LABEL   maintainer="Alberto Duran"
 
 ENV     INSTALL_PATH /MLScraper

@@ -1,41 +1,78 @@
+import re
+import urllib.parse
 from bs4 import BeautifulSoup
-from traceback import format_exc
-
 from scraper.motor import Motor
 from .utils import Seller
 
-
 class Amazon(Motor):
+    DOMAIN = 'https://www.amazon.com.mx'
+
     def __init__(self, search_term: str, seller: Seller = Seller.none):
-        formated_title = search_term.lower().replace(" ", "+")
-        url = f'https://www.amazon.com.mx/s?k={formated_title}&rh=p_6%3A{seller.value}'
-        super().__init__(F'AZ {seller.name} - {search_term}', url)
+        self.search_term = search_term
+        formatted_query = urllib.parse.quote_plus(search_term.lower())
+        url = f'{self.DOMAIN}/s?k={formatted_query}{seller.filter_query}'
+        super().__init__(f'AZ {seller.name} - {search_term}', url)
 
     def scrape_page(self, body: dict):
-        items = list()
+        items = []
         next_url = None
 
-        soup = BeautifulSoup(body['content'], 'html.parser')
-        root = soup.find('div', class_='s-main-slot s-result-list s-search-results sg-row')
-        items_div = root.find_all('div', class_='sg-col-4-of-24 sg-col-4-of-12 s-result-item s-asin sg-col-4-of-16 sg-col s-widget-spacing-small sg-col-4-of-20')
+        content = body.get('content', '')
+        soup = BeautifulSoup(content, 'lxml')
+        
+        # 1. Broadly find search result items.
+        # The HTML uses 's-result-item' and 'data-component-type="s-search-result"'.
+        items_div = soup.find_all('div', {'data-component-type': 's-search-result'})
+        
+        
         for item in items_div:
-            args = {}
-            identifier = item.attrs["data-asin"].strip()
-            price = item.find('span', class_='a-offscreen', text=True)
-            if(identifier and price):
-                args['identifier']  = identifier
-                args['url']         = f'https://www.amazon.com.mx/dp/{identifier}/'
-                args['title']       = item.find('h2', class_='a-size-mini a-spacing-none a-color-base s-line-clamp-4').find('span', text=True).text
-                args['price']       = float(price.text.replace("$", "").replace(",", ""))
-                args['search_term'] = self.search_term
-                items.append(args)
-        try:
-            next_a_tag = root.find('a', class_='s-pagination-item s-pagination-next s-pagination-button s-pagination-separator', href=True)
-            href = next_a_tag['href']
-            if href:
-                next_url = f'https://www.amazon.com.mx{href}'
-        except:
-            #print(format_exc())
-            pass
+            asin = item.get('data-asin')
+            if not asin:
+                continue
+
+            try:
+                # 2. Robust Title Extraction
+                # In your HTML, titles are usually in an 'h2' or a 'span' with a specific data attribute.
+                # Targeting 'h2 a' is the most reliable way to get the text and link.
+                title_tag = item.select_one('h2 a')
+                if not title_tag:
+                    # Fallback for grid views where it might be in a specific span class
+                    title_tag = item.select_one('.a-size-base-plus.a-color-base.a-text-normal')
+                
+                if not title_tag:
+                    continue
+                
+                title = title_tag.get_text(strip=True)
+
+                # 3. Price Extraction
+                # Targeted cleaning for Mexican Peso formatting (e.g., "$1,200.00").
+                price_val = 0.0
+                price_tag = item.select_one('span.a-price span.a-offscreen')
+                
+                if price_tag:
+                    raw_price = price_tag.get_text()
+                    # Remove currency symbols and commas before float conversion
+                    price_str = re.sub(r'[^\d.]', '', raw_price.replace(',', ''))
+                    price_val = float(price_str) if price_str else 0.0
+                else:
+                    # Skip items without price (like out of stock or ads without prices)
+                    continue
+
+                items.append({
+                    'identifier': asin,
+                    'url': f'{self.DOMAIN}/dp/{asin}/',
+                    'title': title,
+                    'price': price_val,
+                    'search_term': self.search_term
+                })
+
+            except (ValueError, AttributeError):
+                continue
+
+        # 4. Pagination (Next Page)
+        # Using the specific classes found in your HTML for the 'Next' button.
+        next_tag = soup.select_one('a.s-pagination-next, span.s-pagination-next a')
+        if next_tag and next_tag.get('href'):
+            next_url = urllib.parse.urljoin(self.DOMAIN, next_tag['href'])
         
         return items, next_url
