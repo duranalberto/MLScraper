@@ -1,201 +1,200 @@
+"""
+provider/palacio_de_hierro/motor.py
+
+Architecture change — SSR HTML parsing replaces Constructor.io API calls
+─────────────────────────────────────────────────────────────────────────
+The previous implementation scraped the HTML only to extract a Constructor.io
+API key and page-size config, then made a second outbound HTTP request to
+ac.cnstrc.com to fetch the actual product data.
+
+The uploaded HTML (buscar?q=macbook-air) shows this is no longer necessary:
+  • `ssrEnabled: true` in data-component-options confirms the server already
+    renders the full product grid into the initial HTML response.
+  • All 43 results (= data-cnstrc-num-results) are present as
+    div[data-cnstrc-item-section='Products'] nodes, each carrying:
+      – data-pid / data-cnstrc-item-id  → identifier
+      – data-cnstrc-item-name           → title
+      – data-cnstrc-item-price          → price
+      – first <a href>                  → canonical product URL (absolute)
+  • pageSize is 52 (was 28); total_num_results is embedded in
+    data-cnstrc-num-results on the grid container, enabling exact
+    ceil-division pagination without a round-trip to the API.
+  • Pagination advances via the `start` query param on the same page URL
+    (standard SFCC / Constructor pattern), not through a `params` JSON blob.
+
+Removed
+───────
+  • All requests / aiohttp imports for the Constructor.io API call
+  • _fetch_constructor_results, _extract_items (API path)
+  • uuid / time imports (were only needed for API client-id / _dt)
+  • ENV-var API-key fallback (no longer relevant)
+  • The blocking requests.Session that was previously breaking the event loop
+
+What remains
+────────────
+  scrape_page   – pure HTML parse, synchronous, returns (items, next_url)
+  _parse_grid   – extracts items from SSR tiles
+  _next_url     – builds the next-page URL from start offset
+  _page_size    – reads pageSize from the component options blob (default 52)
+  _total        – reads data-cnstrc-num-results from the grid container
+"""
+
 import json
-import uuid
-import time
+import logging
 import urllib.parse
-import requests
+from typing import Optional, Tuple, List
+
 from bs4 import BeautifulSoup
+
 from scraper.motor import Motor
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_PAGE_SIZE = 52
 
 
 class PalacioDeHierro(Motor):
     BASE_DOMAIN = "https://www.elpalaciodehierro.com"
-    CONSTRUCTOR_ENDPOINT = "https://ac.cnstrc.com/search"
 
     def __init__(self, search_term: str, url: str):
         super().__init__(search_term, url)
-        self.client_id = str(uuid.uuid4())
-        self.session_id = 1
-        
-        # IMPROVEMENT: Use a Session object for connection pooling (Keep-Alive)
-        # This makes subsequent requests to the same domain significantly faster.
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        })
 
-    # -------------------------------------------------
-    # HTTP
-    # -------------------------------------------------
-    def download(self, url: str) -> dict:
-        # IMPROVEMENT: Use self.session instead of generic requests
-        r = self.session.get(url, timeout=30)
-        r.raise_for_status()
-        return {"url": url, "content": r.text}
-
-    # -------------------------------------------------
+    # ------------------------------------------------------------------
     # ENTRY POINT
-    # -------------------------------------------------
-    def scrape_page(self, body: dict):
-        parsed = urllib.parse.urlparse(body.get("url", ""))
+    # ------------------------------------------------------------------
+    def scrape_page(self, body: dict) -> Tuple[List[dict], Optional[str]]:
+        """
+        Parse the SSR HTML and return (items, next_url).
+        No external HTTP call is made — all product data lives in the page.
+        """
         soup = BeautifulSoup(body.get("content", ""), "lxml")
 
-        # Both Search and Category pages follow the exact same API logic
-        # We route them to a unified processor to reduce code duplication.
-        return self._process_grid_page(soup, parsed)
+        items = self._parse_grid(soup)
 
-    # -------------------------------------------------
-    # UNIFIED GRID LOGIC
-    # -------------------------------------------------
-    def _process_grid_page(self, soup, parsed):
-        current_page = self._extract_current_page(parsed)
-        
-        # Extract config with safety checks
-        api_key, page_size, depth = self._extract_constructor_config(soup)
-        
-        # If we can't find an API key, we can't fetch items. Return empty.
-        if not api_key:
+        if not items:
+            logger.warning("[PH] No product tiles found for '%s'.", self.search_term)
             return [], None
 
-        offset = (current_page - 1) * page_size
-
-        response = self._fetch_constructor_results(
-            api_key=api_key,
-            offset=offset,
-            page_size=page_size,
-            depth=depth,
+        next_url = self._next_url(
+            current_url=body.get("url", self.url),
+            items_on_page=len(items),
+            total=self._total(soup),
+            page_size=self._page_size(soup),
         )
-
-        items = self._extract_items(response)
-
-        # Pagination Logic
-        has_next = len(items) > 0
-        next_url = None
-        
-        if has_next:
-            next_url = self._build_next_url(parsed, current_page + 1)
 
         return items, next_url
 
-    # -------------------------------------------------
-    # CONSTRUCTOR FETCH
-    # -------------------------------------------------
-    def _fetch_constructor_results(self, api_key, offset, page_size, depth):
-        current_page = (offset // page_size) + 1
+    # ------------------------------------------------------------------
+    # PRODUCT TILE EXTRACTION
+    # ------------------------------------------------------------------
+    def _parse_grid(self, soup: BeautifulSoup) -> List[dict]:
+        """
+        Every rendered product tile carries its full data as HTML attributes:
+            data-pid / data-cnstrc-item-id  → identifier
+            data-cnstrc-item-name           → title
+            data-cnstrc-item-price          → price
+            first <a href>                  → absolute product URL
+        """
+        items: List[dict] = []
 
-        params = {
-            "c": "ciojs-client-2.62.4",
-            "key": api_key,
-            "i": self.client_id,
-            "s": self.session_id,
-            "page": current_page,
-            "num_results_per_page": page_size,
-            "fmt_options[groups_max_depth]": depth,
-            "_dt": int(time.time() * 1000),
-        }
+        tiles = soup.select("div[data-cnstrc-item-section='Products']")
+        for tile in tiles:
+            identifier = tile.get("data-pid") or tile.get("data-cnstrc-item-id", "")
+            title = tile.get("data-cnstrc-item-name", "").strip()
+            raw_price = tile.get("data-cnstrc-item-price", "0")
 
-        clean_query = self.search_term.replace("PH ", "")
-        safe_query = urllib.parse.quote(clean_query)
-        
-        url = (
-            f"{self.CONSTRUCTOR_ENDPOINT}/{safe_query}?"
-            f"{urllib.parse.urlencode(params)}"
-        )
-        
-        # print(f"Fetching API: {url}") # Commented out to reduce I/O noise
-
-        try:
-            # Reusing the download method which now uses the persistent session
-            response_data = self.download(url)["content"]
-            data = json.loads(response_data)
-            return data.get("response", {})
-        except Exception:
-            return {}
-
-    # -------------------------------------------------
-    # ITEM EXTRACTION
-    # -------------------------------------------------
-    def _extract_items(self, response):
-        items = []
-        # Safety: Ensure 'results' is a list, even if API returns None or dict
-        results = response.get("results", [])
-        if not isinstance(results, list):
-            return items
-
-        for r in results:
-            d = r.get("data", {})
-            
-            product_url = d.get("url") or ""
-            if product_url and product_url.startswith("/"):
-                product_url = f"{self.BASE_DOMAIN}{product_url}"
+            if not identifier or not title:
+                continue
 
             try:
-                raw_price = d.get("price") or 0
-                price_val = float(raw_price)
-            except (ValueError, TypeError):
-                price_val = 0.0
+                price = float(raw_price)
+            except ValueError:
+                price = 0.0
 
-            # Identifier fallback to prevent errors if 'id' is missing
-            identifier = d.get("id") or (r.get("matched_terms") and r.get("matched_terms")[0]) or str(uuid.uuid4())
+            link = tile.select_one("a[href]")
+            url = link["href"] if link else ""
+            if url.startswith("/"):
+                url = f"{self.BASE_DOMAIN}{url}"
 
-            items.append({
-                "identifier": identifier,
-                "url": product_url,
-                "title": r.get("value"),
-                "price": price_val,
-                "search_term": self.search_term,
-            })
+            items.append(
+                {
+                    "identifier": str(identifier),
+                    "title": title,
+                    "price": price,
+                    "url": url,
+                    "search_term": self.search_term,
+                }
+            )
 
         return items
 
-    # -------------------------------------------------
-    # HTML CONFIG (IMPROVED SAFETY)
-    # -------------------------------------------------
-    def _extract_constructor_config(self, soup):
-        api_key = None
-        
-        # IMPROVEMENT: Safety check. If select_one returns None, .get() would crash.
-        controller = soup.select_one("div[data-js-constructor-controller]")
-        if controller:
-            api_key = controller.get("data-api-key")
+    # ------------------------------------------------------------------
+    # PAGINATION
+    # ------------------------------------------------------------------
+    def _next_url(
+        self,
+        current_url: str,
+        items_on_page: int,
+        total: int,
+        page_size: int,
+    ) -> Optional[str]:
+        """
+        Builds the next-page URL by incrementing the `start` offset.
+        Returns None when the current page already covers all results.
 
-        page_size = 28
-        depth = 5
+        Constructor / SFCC pagination:
+            page 1 → (no start param, or start=0)
+            page 2 → start=<page_size>
+            page 3 → start=<page_size * 2>
+            …
+        """
+        if total <= 0 or items_on_page < page_size:
+            # Fewer items than a full page → we are on the last page
+            return None
 
-        config = soup.select_one('section[data-component="search/ConstructorSearch"]')
+        parsed = urllib.parse.urlparse(current_url)
+        qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
 
-        if config and config.has_attr("data-component-options"):
-            try:
-                opts = json.loads(config["data-component-options"])
-                page_size = opts.get("pageSize", page_size)
-                depth = opts.get("groupsMaxDepth", depth)
-            except Exception:
-                pass
+        current_start = int(qs.get("start", ["0"])[0] or 0)
+        next_start = current_start + page_size
 
-        return api_key, page_size, depth
+        if next_start >= total:
+            return None
 
-    # -------------------------------------------------
-    # PAGE STATE
-    # -------------------------------------------------
-    def _extract_current_page(self, parsed):
-        qs = urllib.parse.parse_qs(parsed.query)
-        if "params" in qs:
-            try:
-                params = json.loads(urllib.parse.unquote(qs["params"][0]))
-                return int(params.get("page", 1))
-            except Exception:
-                pass
-        return 1
-
-    def _build_next_url(self, parsed, next_page):
-        qs = urllib.parse.parse_qs(parsed.query)
-        qs['params'] = [json.dumps({'page': next_page})]
+        qs["start"] = [str(next_start)]
         new_query = urllib.parse.urlencode(qs, doseq=True)
-        
-        return urllib.parse.urlunparse((
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            parsed.params,
-            new_query,
-            parsed.fragment
-        ))
+
+        return urllib.parse.urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                new_query,
+                parsed.fragment,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # HTML CONFIG HELPERS
+    # ------------------------------------------------------------------
+    def _page_size(self, soup: BeautifulSoup) -> int:
+        """Reads pageSize from the ConstructorSearch component options blob."""
+        section = soup.select_one('section[data-component="search/ConstructorSearch"]')
+        if section and section.has_attr("data-component-options"):
+            try:
+                opts = json.loads(section["data-component-options"])
+                return int(opts.get("pageSize", _DEFAULT_PAGE_SIZE))
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.warning("[PH] Could not parse pageSize from component options: %s", exc)
+        return _DEFAULT_PAGE_SIZE
+
+    def _total(self, soup: BeautifulSoup) -> int:
+        """Reads the server-reported total result count from the grid container."""
+        grid = soup.select_one("[data-cnstrc-num-results]")
+        if grid:
+            try:
+                return int(grid["data-cnstrc-num-results"])
+            except (ValueError, KeyError):
+                pass
+        return 0
