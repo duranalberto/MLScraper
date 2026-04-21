@@ -1,0 +1,86 @@
+# Scraping Job Catalogue
+# ──────────────────────
+# Each entry requires a `provider` key that maps to a registered factory.
+# All other keys are provider-specific and forwarded verbatim to the factory.
+#
+# Providers
+# ─────────
+#   ml  →  MercadoLibre
+#   az  →  Amazon
+#   lv  →  Liverpool
+#   ph  →  Palacio de Hierro
+#
+# MercadoLibre categories (optional — default: consolas_videojuegos)
+#   none | consolas | videojuegos | consolas_videojuegos | deportes_jersey
+#   iphone_trece_pro_usado | iphone_once_pro_usado | iphone_se_usado | apple_official
+#
+# Amazon sellers (optional — default: none)
+#   none | amazon_mx | amazon_usa | amazon_remates | buyspry
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+
+  # ── MercadoLibre ──────────────────────────────────────────────────────────
+  - provider: ml
+    search_term: fire emblem
+
+  - provider: ml
+    search_term: zelda wii
+
+  - provider: ml
+    search_term: pokemon ds
+
+  - provider: ml
+    search_term: nintendo ds
+    category: consolas
+
+  - provider: ml
+    search_term: nintendo switch
+    category: consolas
+
+  - provider: ml
+    search_term: lote nintendo
+
+  - provider: ml
+    search_term: atlas
+    category: deportes_jersey
+
+  - provider: ml
+    search_term: game cube
+    category: consolas
+
+  - provider: ml
+    search_term: game cube juegos
+
+  # ── Liverpool ─────────────────────────────────────────────────────────────
+  - provider: lv
+    search_term: Laptops
+    url: "https://www.liverpool.com.mx/tienda/Laptops/N-Z6GQrU4fZmxjTFXt9XTtjADb51HPoq41uykVTx%2F8p7q4Lv5kmJ%2FB7n9SHDZAiZOr"
+
+  - provider: lv
+    search_term: Juegos Nintendo
+    url: "https://www.liverpool.com.mx/tienda/Juegos/N-Z6GQrU4fZmxjTFXt9XTtjEMtiDHLusAuxLK0y30fWRU5PhnhiYjJElHuz9EseRgf"
+
+  # ── Palacio de Hierro ──────────────────────────────────────────────────────
+  - provider: ph
+    search_term: Macbook
+    url: "https://www.elpalaciodehierro.com/buscar?q=macbook"
+
+  # ── Amazon ────────────────────────────────────────────────────────────────
+  - provider: az
+    search_term: macbook
+    seller: amazon_mx
+
+  - provider: az
+    search_term: mac studio
+    seller: amazon_mx
+
+  # Uncomment to activate:
+  # - provider: az
+  #   search_term: pokemon tcg
+  #   seller: amazon_mx
+
+  # - provider: az
+  #   search_term: iphone
+  #   seller: amazon_remates
