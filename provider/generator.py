@@ -103,10 +103,10 @@ def ___get_motors() -> list[Motor]:
 
 def get_motors() -> list[Motor]:
     return [
-        ML('zelda wii'),
-        LV(search_term = 'LV PS5', url = 'https://www.liverpool.com.mx/tienda/N-h3a9z55R%2BBgKAi22uasITA%3D%3D?s=ps5'),
-        AZ(search_term='pokemon tcg', seller = Seller.amazon_mx),
-        PH(search_term = 'PH Electrodomestios', url ='https://www.elpalaciodehierro.com/hogar/electrodomesticos/'),
-        ML('atlas', category=Category.deportes_jersey),
-        #PH(search_term = 'PH Apple', url ='https://www.elpalaciodehierro.com/buscar?q=apple'),
+        #ML('zelda wii'),
+        #LV(search_term = 'LV PS5', url = 'https://www.liverpool.com.mx/tienda/N-h3a9z55R%2BBgKAi22uasITA%3D%3D?s=ps5'),
+        #AZ(search_term='pokemon tcg', seller = Seller.amazon_mx),
+        #PH(search_term = 'PH Electrodomestios', url ='https://www.elpalaciodehierro.com/hogar/electrodomesticos/'),
+        #ML('atlas', category=Category.deportes_jersey),
+        PH(search_term = 'PH Macbook Air', url ='https://www.elpalaciodehierro.com/buscar?q=macbook-air'),
     ]
