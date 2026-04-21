@@ -1,128 +1,190 @@
-from dataclasses import dataclass, fields, field, MISSING
-from datetime import datetime as datatime_lib
-from typing import List, Self, Optional, Dict, Any
+"""
+scraper/article.py
+
+Article and ArticleHistory dataclasses.
+
+Changes from previous version
+──────────────────────────────
+• `search_term` has been removed from Article entirely.
+  It was owned by the Motor that scraped it, not by the article itself.
+  Storing it on every record was redundant and wasted disk space.
+  The Motor passes its own search_term / label wherever it is needed
+  (e.g. Telegram messages, broadcast payloads).
+
+• `Article.is_valid_args` no longer requires 'search_term'.
+
+• `Article.dump` no longer serialises 'search_term'.
+
+• `ArticleHistory.dump` is unchanged.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, fields
+from datetime import datetime as datetime_lib
+from typing import Any, Dict, List, Optional, Self
 
 from .status import Status
+
+
+# ---------------------------------------------------------------------------
+# ArticleHistory
+# ---------------------------------------------------------------------------
 
 @dataclass
 class ArticleHistory:
     datetime: str
-    title: Optional[str] = None
-    price: Optional[str] = None
+    title:    Optional[str] = None
+    price:    Optional[str] = None
 
     def __str__(self) -> str:
-        return f'[{self.datetime}] - {self.title}  ${self.price}'
+        return f"[{self.datetime}] - {self.title}  ${self.price}"
 
     def dump(self) -> Dict[str, Any]:
-        dump = {'datetime': self.datetime}
-        if self.title:
-            dump['tile'] = self.title
-        if self.price:
-            dump['price'] = self.price
-        return dump
+        d: Dict[str, Any] = {"datetime": self.datetime}
+        if self.title is not None:
+            d["title"] = self.title
+        if self.price is not None:
+            d["price"] = self.price
+        return d
 
     @staticmethod
-    def create(args: Dict[str, Any]) -> Optional[Self]:
-        is_valid = 'datetime' in args and args['datetime'] and ('title' in args or 'price' in args)
-        if not is_valid:
+    def create(args: Dict[str, Any]) -> Optional[ArticleHistory]:
+        if "datetime" not in args or not args["datetime"]:
             return None
-
+        if "title" not in args and "price" not in args:
+            return None
         return ArticleHistory(
-            datetime=args['datetime'],
-            title=args.get('title'),
-            price=args.get('price')
+            datetime=args["datetime"],
+            title=args.get("title"),
+            price=args.get("price"),
         )
 
 
+# ---------------------------------------------------------------------------
+# Article
+# ---------------------------------------------------------------------------
+
 @dataclass
 class Article:
-    search_term: str
-    identifier: str
-    title: str
-    price: float
-    url: Optional[str] = None
-    datetime: str = field(default_factory=lambda: str(datatime_lib.now()))
-    status: Status = Status.none
-    history: List[ArticleHistory] = field(default_factory=list)
-    last_updated: Optional[str] = None
+    identifier:   str
+    title:        str
+    price:        float
+    url:          Optional[str]  = None
+    datetime:     str            = field(default_factory=lambda: str(datetime_lib.now()))
+    status:       Status         = Status.none
+    history:      List[ArticleHistory] = field(default_factory=list)
+    last_updated: Optional[str]  = None
 
-    def __post_init__(self):
-        self.history = self.load_history(self.history)
+    def __post_init__(self) -> None:
+        self.history = self._load_history(self.history)
 
-    def __str__(self):
-        return '[' + str(self.datetime)  + '] - ' + 'to_add' + '  ->  ' + self.title + '  $' + self.price + ' datetime ' + self.datetime
-    
-    def __repr__(self):
+    # ------------------------------------------------------------------
+    # Identity / comparison
+    # ------------------------------------------------------------------
+
+    def __str__(self) -> str:
+        return f"[{self.datetime}]  {self.title}  ${self.price}"
+
+    def __repr__(self) -> str:
         return self.identifier
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.identifier)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Article):
             return self.identifier == other.identifier
         return NotImplemented
 
-    def load_history(self, to_load, fix: bool= False) -> List[ArticleHistory]:
-        history = list()
+    # ------------------------------------------------------------------
+    # History helpers
+    # ------------------------------------------------------------------
 
-        if to_load:
-            for data in to_load:
-                article_history = ArticleHistory.create(data)
-                if article_history:
-                    history.append(article_history)
-        # TODO: This is a fix to update files, it should be added when the data is created
+    def _load_history(self, raw: list, fix: bool = False) -> List[ArticleHistory]:
+        history: List[ArticleHistory] = []
+        for item in (raw or []):
+            ah = ArticleHistory.create(item)
+            if ah:
+                history.append(ah)
+
         if fix:
             if len(history) == 1:
                 history[0].datetime = self.datetime
             elif len(history) > 1:
                 history.sort(key=lambda x: x.datetime, reverse=True)
                 history[-1].datetime = self.datetime
+
         return history
 
-    def update(self, to_update: dict) -> bool:
-        keys_to_update = ['title', 'price']
-        changes = {key: getattr(self, key) for key in keys_to_update if key in to_update and getattr(self, key) != to_update[key]}
+    # ------------------------------------------------------------------
+    # Mutation
+    # ------------------------------------------------------------------
 
-        for key in changes:
-            setattr(self, key, to_update[key])
-        
-        if changes:
-            is_first_update = not self.history
-            changes['datetime'] = self.datetime if is_first_update else self.last_updated
-            article_history  = ArticleHistory.create(changes)
-
-            if article_history :
-                self.last_updated = str(datatime_lib.now())
-                self.history.insert(0, article_history)
-                return True
-        return False
-    
-    def dump(self) -> dict:
-        dump = {
-            'search_term': self.search_term,
-            'url': self.url,
-            'identifier': self.identifier,
-            'title': self.title,
-            'price': self.price,
-            'datetime': str(self.datetime),
-            'status': self.status,
+    def update(self, to_update: Dict[str, Any]) -> bool:
+        """
+        Apply title/price changes and record them in history.
+        Returns True if any field actually changed.
+        """
+        keys = ("title", "price")
+        changes = {
+            k: to_update[k]
+            for k in keys
+            if k in to_update and getattr(self, k) != to_update[k]
         }
-        
+
+        if not changes:
+            return False
+
+        for k, v in changes.items():
+            setattr(self, k, v)
+
+        is_first = not self.history
+        changes["datetime"] = self.datetime if is_first else self.last_updated
+        ah = ArticleHistory.create(changes)
+        if ah:
+            self.last_updated = str(datetime_lib.now())
+            self.history.insert(0, ah)
+
+        return True
+
+    # ------------------------------------------------------------------
+    # Serialisation
+    # ------------------------------------------------------------------
+
+    def dump(self) -> Dict[str, Any]:
+        """
+        Serialise to a dict suitable for JSON storage.
+        `search_term` is intentionally omitted — it belongs to the Motor,
+        not to individual articles.
+        """
+        d: Dict[str, Any] = {
+            "identifier": self.identifier,
+            "title":      self.title,
+            "price":      self.price,
+            "url":        self.url,
+            "datetime":   str(self.datetime),
+            "status":     self.status,
+        }
         if self.history:
-            dump['last_updated'] = self.last_updated
-            dump['history'] = [ah.dump() for ah in self.history]
-        
-        return dump 
-    
+            d["last_updated"] = self.last_updated
+            d["history"] = [ah.dump() for ah in self.history]
+        return d
+
+    # ------------------------------------------------------------------
+    # Factory
+    # ------------------------------------------------------------------
+
     @staticmethod
     def is_valid_args(args: Dict[str, Any]) -> bool:
-        required_fields: set[str] = {f.name for f in fields(Article) if f.default is MISSING and f.default_factory is MISSING}
-        missing_keys = required_fields - args.keys()
-        return not missing_keys
+        # Required fields (no default): identifier, title, price
+        required = {"identifier", "title", "price"}
+        return required.issubset(args.keys())
 
     @staticmethod
-    def create(args: dict) -> Optional[Self]:
+    def create(args: Dict[str, Any]) -> Optional[Article]:
         if not Article.is_valid_args(args):
             return None
-        return Article(**args)
+        # Drop unknown keys so the dataclass constructor doesn't choke
+        known = {f.name for f in fields(Article)}
+        return Article(**{k: v for k, v in args.items() if k in known})
