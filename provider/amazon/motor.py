@@ -21,9 +21,7 @@ class Amazon(Motor):
         soup = BeautifulSoup(content, 'lxml')
         
         # 1. Broadly find search result items.
-        # The HTML uses 's-result-item' and 'data-component-type="s-search-result"'.
         items_div = soup.find_all('div', {'data-component-type': 's-search-result'})
-        
         
         for item in items_div:
             asin = item.get('data-asin')
@@ -32,12 +30,11 @@ class Amazon(Motor):
 
             try:
                 # 2. Robust Title Extraction
-                # In your HTML, titles are usually in an 'h2' or a 'span' with a specific data attribute.
-                # Targeting 'h2 a' is the most reliable way to get the text and link.
-                title_tag = item.select_one('h2 a')
+                # Update: In modern Amazon HTML, <a> wraps <h2>, and the text is often inside <h2><span>
+                title_tag = item.select_one('h2 span')
                 if not title_tag:
-                    # Fallback for grid views where it might be in a specific span class
-                    title_tag = item.select_one('.a-size-base-plus.a-color-base.a-text-normal')
+                    # Fallback directly to h2 just in case the span is missing
+                    title_tag = item.select_one('h2')
                 
                 if not title_tag:
                     continue
@@ -45,7 +42,7 @@ class Amazon(Motor):
                 title = title_tag.get_text(strip=True)
 
                 # 3. Price Extraction
-                # Targeted cleaning for Mexican Peso formatting (e.g., "$1,200.00").
+                # Target: <span class="a-price"><span class="a-offscreen">$599.00</span></span>
                 price_val = 0.0
                 price_tag = item.select_one('span.a-price span.a-offscreen')
                 
@@ -55,7 +52,7 @@ class Amazon(Motor):
                     price_str = re.sub(r'[^\d.]', '', raw_price.replace(',', ''))
                     price_val = float(price_str) if price_str else 0.0
                 else:
-                    # Skip items without price (like out of stock or ads without prices)
+                    # Skip items without price (like out of stock or some ads)
                     continue
 
                 items.append({
@@ -70,7 +67,7 @@ class Amazon(Motor):
                 continue
 
         # 4. Pagination (Next Page)
-        # Using the specific classes found in your HTML for the 'Next' button.
+        # Class 's-pagination-next' is still correctly used for the "Next" anchor tag.
         next_tag = soup.select_one('a.s-pagination-next, span.s-pagination-next a')
         if next_tag and next_tag.get('href'):
             next_url = urllib.parse.urljoin(self.DOMAIN, next_tag['href'])
