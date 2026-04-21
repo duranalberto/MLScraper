@@ -7,8 +7,14 @@ from .utils import Category, get_identifier, construct_search_url
 
 class MercadoLibre(Motor):
 
-    def __init__(self, search_term: str, category: Category = Category.consolas_videojuegos):
-        super().__init__(search_term, construct_search_url(search_term, category))
+    def __init__(
+        self,
+        search_term: str,
+        category: Category = Category.consolas_videojuegos,
+        *,
+        storage_path: str,
+    ):
+        super().__init__(search_term, construct_search_url(search_term, category), storage_path=storage_path)
 
     def scrape_page(self, body):
         items = []
@@ -50,7 +56,6 @@ class MercadoLibre(Motor):
                     'identifier': identifier,
                     'title': link_tag.get_text(' ', strip=True),
                     'price': price_span.get_text(strip=True) if price_span else '0',
-                    'search_term': self.search_term,
                     'url': clean_url,
                 })
             except Exception as e:
@@ -59,12 +64,11 @@ class MercadoLibre(Motor):
                 continue
 
         page_size = self._get_page_size(soup, items)
-
         next_url = self._next_url(
             current_url=body.get('url', self.url),
             items_on_page=len(items),
             page_size=page_size,
-            soup=soup
+            soup=soup,
         )
 
         return items, next_url
@@ -77,19 +81,13 @@ class MercadoLibre(Motor):
                 return data["props"]["pageProps"]["initialState"]["melidata_track"]["event_data"]["limit"]
         except Exception:
             pass
-
-        if items:
-            return len(items)
-
-        return 50
+        return len(items) if items else 50
 
     def _next_url(self, current_url: str, items_on_page: int, page_size: int, soup: BeautifulSoup):
         if items_on_page < page_size:
             return None
-
         if not self._has_next_page(soup):
             return None
-
         next_offset = self._next_offset(current_url, page_size)
         return self._inject_offset(current_url, next_offset)
 
@@ -100,35 +98,28 @@ class MercadoLibre(Motor):
         )
         if not next_a:
             return False
-
         next_li = next_a.find_parent('li', class_=re.compile(r'andes-pagination__button--next'))
         if next_li and 'andes-pagination__button--disabled' in (next_li.get('class') or []):
             return False
-
         return True
 
     def _next_offset(self, current_url: str, page_size: int) -> int:
         match = re.search(r'_Desde_(\d+)', current_url)
         if match:
             return int(match.group(1)) + page_size
-
         return page_size + 1
 
     def _inject_offset(self, current_url: str, next_offset: int) -> str:
         from urllib.parse import urlparse, urlunparse
-
         parsed = urlparse(current_url)
         path = parsed.path
 
         if re.search(r'_Desde_\d+', path):
             path = re.sub(r'_Desde_\d+', f'_Desde_{next_offset}', path, count=1)
-
         elif path.startswith('/_CustId_'):
             path = f'/_Desde_{next_offset}{path[1:]}'
-
         elif '_NoIndex_True' in path:
             path = path.replace('_NoIndex_True', f'_Desde_{next_offset}_NoIndex_True', 1)
-
         else:
             path = f'{path}_Desde_{next_offset}'
 

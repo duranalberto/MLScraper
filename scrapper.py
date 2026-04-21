@@ -1,3 +1,16 @@
+"""
+scrapper.py
+
+Orchestrator — runs all motors on a schedule and routes broadcast events.
+
+Changes
+───────
+• Motor.scrape() now calls motor._article_payload(article) before broadcasting,
+  which injects `search_term` into the outbound payload at the last moment.
+  The field is no longer stored in JSON; it only travels over the wire.
+• scrapper.get_list() no longer accesses article.search_term.
+"""
+
 import asyncio
 import logging
 from json import dumps as json_dumps
@@ -8,8 +21,8 @@ from provider.generator import get_motors
 from scraper.motor import Motor
 from utils.telegram import send_new_to_telegram, send_price_drop_to_telegram
 
-# Setup basic logging for visibility
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class Scrapper:
     def __init__(self, caller: Optional[Callable] = None):
@@ -18,31 +31,29 @@ class Scrapper:
         self.caller = caller
 
     def get_list(self) -> list[dict]:
-        """Returns a snapshot of current active elements."""
+        """Returns a snapshot of current active elements for the /api/search endpoint."""
         return [
-            {'title': motor.search_term, 'elements': motor.active.get_list()} 
+            {
+                'title': motor.search_term,
+                'elements': [motor._article_payload(a) for a in motor.active],
+            }
             for motor in self.motors
         ]
 
     async def run(self):
-        """Main loop for the scraper."""
+        """Main scraping loop."""
         logging.info("Scraper service started.")
         while True:
             start_time = time()
-            
             try:
-                # Run all motor scrapes concurrently
-                tasks = [
-                    motor.scrape(caller=self._broadcast, silent=True) 
+                await asyncio.gather(*[
+                    motor.scrape(caller=self._broadcast, silent=True)
                     for motor in self.motors
-                ]
-                await asyncio.gather(*tasks)
-                
+                ])
                 duration = time() - start_time
                 status_msg = f"Scraping cycle finished in {duration:.2f} seconds."
                 logging.info(status_msg)
                 await self._broadcast_scrape_finished(status_msg)
-                
             except Exception as e:
                 logging.error(f"Error during scraping cycle: {e}")
 
@@ -52,7 +63,6 @@ class Scrapper:
         """Routes broadcast events to specific handlers."""
         if broadcast:
             return
-            
         if broadcast_type == 'new_element':
             await self._broadcast_new_element(element)
         elif broadcast_type == 'is_updated':
@@ -66,7 +76,7 @@ class Scrapper:
             await self.caller(json_dumps(response))
 
     def _parse_price(self, price_val: Any) -> float:
-        """Helper to safely convert price strings/numbers to float."""
+        """Safely convert price strings/numbers to float."""
         if isinstance(price_val, (int, float)):
             return float(price_val)
         if isinstance(price_val, str):
@@ -76,7 +86,6 @@ class Scrapper:
     async def _broadcast_is_updated(self, element: dict):
         """Logic to handle price drops or data updates."""
         history = element.get('history', [])
-        
         if not history or 'price' not in history[0]:
             return
 
@@ -88,21 +97,17 @@ class Scrapper:
 
         percent_change = ((new_value - last_value) / abs(last_value)) * 100
 
-        # Notify only if price dropped by 14% or more
         if percent_change <= -14:
             element['percent_change'] = f"{abs(percent_change):.2f}"
-            logging.info(f"PRICE DROP: {element['title']} ({element['percent_change']}%) - {element.get('url')}")
-            
+            logging.info(f"PRICE DROP: {element.get('title')} ({element['percent_change']}%) - {element.get('url')}")
             send_price_drop_to_telegram(element)
-            
             if self.caller:
                 await self.caller(json_dumps({'message': 'price drop', 'payload': element}))
 
     async def _broadcast_scrape_finished(self, status_text: str):
         """Notifies caller that a full cycle is complete."""
         if self.caller:
-            response = {'message': 'scrape status', 'payload': status_text}
-            await self.caller(json_dumps(response))
+            await self.caller(json_dumps({'message': 'scrape status', 'payload': status_text}))
 
 
 if __name__ == '__main__':

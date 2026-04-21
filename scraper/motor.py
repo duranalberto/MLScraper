@@ -1,206 +1,294 @@
-import asyncio
-from abc import ABC, abstractmethod
-from aiohttp import ClientSession, ClientTimeout, ClientError
-from json import dumps as json_dumps
-from typing import Optional, Tuple, List, Callable, Any
-from traceback import format_exc
+"""
+scraper/motor.py
 
-from .stream import Stream
+Motor — abstract base for all scrapers.
+
+Storage changes
+───────────────
+• Motors no longer derive their storage path from `search_term`.
+  Instead they receive an explicit `storage_path` (e.g.
+  "mercado_libre/zelda-wii.json") injected by the factory in
+  provider/factories.py.  This eliminates:
+    – flat-root collisions between providers
+    – collisions between same-term/different-filter jobs
+      (e.g. ML "nintendo ds" consolas vs ML "nintendo ds" videojuegos)
+    – Amazon's ad-hoc name building (f'AZ {seller} - {term}')
+
+• `search_term` is still stored on the Motor for display / broadcast
+  purposes (Telegram messages, scraper logs, WebSocket payloads) but
+  it is no longer used for anything storage-related.
+
+• `load_from_file` no longer patches `data['search_term']` into each
+  record — the field no longer exists on Article.
+
+• `save_to_file` writes to `self.storage_path` (a relative path under
+  data/).
+
+Article changes
+───────────────
+• Article.create / is_valid_args no longer require 'search_term'.
+• Article.dump no longer emits 'search_term'.
+  See scraper/article.py for details.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from abc import ABC, abstractmethod
+from json import dumps as json_dumps
+from traceback import format_exc
+from typing import Any, Callable, List, Optional, Tuple
+
+from aiohttp import ClientError, ClientSession, ClientTimeout
+
 from .article import Article
 from .status import Status
-
+from .stream import Stream
 from utils.file_manager import read_json_file, write_in_file
 from utils.headers import get_random_header
 
+logger = logging.getLogger(__name__)
+
+
 class Motor(ABC):
-    def __init__(self, search_term: str, url: str, debug: bool = True):
-        self.search_term = search_term
-        self.url = url
-        self.file_name = f"{search_term}.json"
-        self.active = Stream(Status.active)
-        self.finished = Stream(Status.finished)
-        self.debug = debug
-        
-        # Load existing state
+    def __init__(
+        self,
+        search_term: str,
+        url: str,
+        storage_path: str,      # e.g. "mercado_libre/zelda-wii.json"
+        debug: bool = True,
+    ) -> None:
+        self.search_term  = search_term
+        self.url          = url
+        self.storage_path = storage_path   # relative path under data/
+        self.active       = Stream(Status.active)
+        self.finished     = Stream(Status.finished)
+        self.debug        = debug
+
         self.load_from_file()
 
-    async def _fetch(self, session: ClientSession, url: str, retries: int = 3) -> Optional[str]:
-        """
-        Helper: Fetches URL with retries and exponential backoff.
-        Returns HTML string or None if failed.
-        """
+    # ------------------------------------------------------------------
+    # HTTP
+    # ------------------------------------------------------------------
+
+    async def _fetch(
+        self,
+        session: ClientSession,
+        url: str,
+        retries: int = 3,
+    ) -> Optional[str]:
         for attempt in range(retries):
             try:
                 async with session.get(url) as resp:
                     if resp.status == 200:
                         return await resp.text()
-                    elif resp.status in {404, 403, 500}:
-                        # Stop retrying on fatal errors if necessary, 
-                        # or continue if you want to force through 500s
-                        if self.debug:
-                            print(f"Status {resp.status} for {url}")
+                    if self.debug:
+                        logger.warning("HTTP %s for %s", resp.status, url)
+                    if resp.status in {403, 404}:
+                        break   # Don't retry permanent failures
             except (ClientError, asyncio.TimeoutError):
                 pass
-            
-            # Exponential backoff (0.5s, 1s, 2s...)
+
             if attempt < retries - 1:
                 await asyncio.sleep(0.5 * (2 ** attempt))
-        
+
         return None
 
-    async def scrape(self, caller: Optional[Callable] = None, silent: bool = False):
-        """Scrapes the target URL and handles pagination and updates."""
-        results = []
-        current_url = self.url
-        
-        # Increased timeout for slower connections
+    # ------------------------------------------------------------------
+    # Scrape orchestration
+    # ------------------------------------------------------------------
+
+    async def scrape(
+        self,
+        caller: Optional[Callable] = None,
+        silent: bool = False,
+    ) -> None:
+        results: List[Article] = []
+        current_url: Optional[str] = self.url
+
         timeout = ClientTimeout(total=45)
-        
+
         try:
-            current_headers = get_random_header()
-            async with ClientSession(headers=current_headers, timeout=timeout) as session:
+            async with ClientSession(
+                headers=get_random_header(), timeout=timeout
+            ) as session:
                 while current_url:
-                    # 1. Reliable Fetch
-                    html_content = await self._fetch(session, current_url)
-                    
-                    if not html_content:
-                        if self.debug: print(f"Failed to fetch content for: {current_url}")
+                    html = await self._fetch(session, current_url)
+                    if not html:
+                        if self.debug:
+                            logger.warning(
+                                "Failed to fetch '%s' for '%s'",
+                                current_url,
+                                self.search_term,
+                            )
                         break
 
-                    # 2. Scrape Page (Protected)
                     try:
-                        body = {'content': html_content, 'url': current_url}
-                        # Unpack safely
-                        scrape_result = self.scrape_page(body)
-                        items, next_page_url = scrape_result
-                    except Exception as e:
-                        print(f"Error parsing {current_url}: {e}")
-                        if self.debug: print(format_exc())
+                        body = {"content": html, "url": current_url}
+                        items, next_url = self.scrape_page(body)
+                    except Exception:
+                        logger.error(
+                            "Error parsing %s:\n%s", current_url, format_exc()
+                        )
                         break
 
-                    # 3. Handle Empty/None Items safely (Your specific request)
-                    if items is None:
-                        items = []
+                    items = items or []
 
                     if not silent:
-                        print(f'Scraping {self.search_term} | Found: {len(items)} | Next: {"Yes" if next_page_url else "No"}')
-                        if self.debug and len(items) > 0:
-                            print(items[0]) # Print first item only to reduce noise
-                    
-                    # 4. Process Items
+                        logger.info(
+                            "%-35s | found: %3d | next: %s",
+                            self.search_term,
+                            len(items),
+                            "yes" if next_url else "no",
+                        )
+
                     for item in items:
                         article, is_new, is_updated = self.save(item)
-                        
+
                         if self.is_article(article):
                             results.append(article)
-                            
-                            # Broadcast updates
-                            if caller and (is_new or is_updated):
-                                b_type = 'new_element' if is_new else 'is_updated'
-                                try:
-                                    await caller(broadcast_type=b_type, element=article.dump())
-                                except Exception:
-                                    # Don't let a broadcast failure stop the scraper
-                                    pass
-                        current_url = next_page_url
-                    else:
-                        current_url = None
 
-            # -------------------------------------------------
-            # POST-PROCESSING
-            # -------------------------------------------------
-            if results or (not results and self.active.get_list()):
-                if not silent:
-                    print(f'Total articles recorded for {self.search_term}: {len(results)}')
-                
-                # Identify and move articles that are no longer present in the scrape
-                deleted_articles = self.active - results
-                for deleted in deleted_articles:
-                    self.save(deleted, to_status=Status.finished)
-                
-                await self.save_to_file()
-                
+                            if caller and (is_new or is_updated):
+                                b_type = "new_element" if is_new else "is_updated"
+                                try:
+                                    await caller(
+                                        broadcast_type=b_type,
+                                        element=self._article_payload(article),
+                                    )
+                                except Exception:
+                                    pass
+
+                    current_url = next_url
+
         except Exception:
-            print(f"Scrape for {self.search_term} crashed critically!")
-            if self.debug:
-                print(format_exc())
+            logger.error(
+                "Scrape for '%s' crashed:\n%s", self.search_term, format_exc()
+            )
+            return
+
+        # ------------------------------------------------------------------
+        # Post-processing
+        # ------------------------------------------------------------------
+        if results or self.active.get_list():
+            deleted = self.active - results
+            for d in deleted:
+                self.save(d, to_status=Status.finished)
+
+            await self.save_to_file()
+
+            if not silent:
+                logger.info(
+                    "%-35s | total recorded: %d",
+                    self.search_term,
+                    len(results),
+                )
+
+    # ------------------------------------------------------------------
+    # Abstract interface
+    # ------------------------------------------------------------------
 
     @abstractmethod
-    def scrape_page(self, body: dict) -> Tuple[List[Any], Optional[str]]:
-        """Must return a list of items and the URL for the next page (or None)."""
-        pass
+    def scrape_page(
+        self, body: dict
+    ) -> Tuple[List[Any], Optional[str]]:
+        """Return (items_list, next_page_url_or_None)."""
 
-    def save(self, item: Any, to_status: Status = Status.none, at_beginning: bool = True) -> Tuple[Optional[Article], bool, bool]:
-        """Handles the logic of moving articles between active and finished streams."""
-        is_new = False
-        is_updated = False
-        
-        # Robust check if item is already an object or raw dict
+    # ------------------------------------------------------------------
+    # Article lifecycle
+    # ------------------------------------------------------------------
+
+    def save(
+        self,
+        item: Any,
+        to_status: Status = Status.none,
+        at_beginning: bool = True,
+    ) -> Tuple[Optional[Article], bool, bool]:
+        is_new = is_updated = False
+
         article = item if self.is_article(item) else self.create_article(item)
-
         if not article:
             return None, False, False
 
-        # Determine target status
-        target_status = to_status if to_status != Status.none else (article.status or Status.active)
+        target = to_status if to_status != Status.none else Status.active
 
-        if target_status == Status.active:
-            # Check if it was previously 'finished'
+        if target == Status.active:
             previously_finished = self.finished.delete(article)
-            
-            # If it's not in active, it's new
+
             if article not in self.active and previously_finished is None:
                 self.active.add(article, at_beginning)
                 is_new = True
             else:
-                # Update existing data
                 existing = previously_finished or article
-                updated_article = self.active.update(existing)
-                
-                # Ensure update returned valid object
-                if self.is_article(updated_article):
-                    article = updated_article
+                updated = self.active.update(existing)
+                if self.is_article(updated):
+                    article = updated
                     is_updated = True
-                    
-        elif target_status == Status.finished:
+
+        elif target == Status.finished:
             removed = self.active.delete(article)
             self.finished.add(removed or article)
 
         return article, is_new, is_updated
 
-    def is_article(self, obj: Any) -> bool:
+    @staticmethod
+    def is_article(obj: Any) -> bool:
         return isinstance(obj, Article)
 
     def create_article(self, data: dict) -> Optional[Article]:
         try:
-            return Article.create(data)
+            # Drop 'search_term' if it was loaded from an old JSON file
+            # that still has the field.  It is no longer part of Article.
+            clean = {k: v for k, v in data.items() if k != "search_term"}
+            return Article.create(clean)
         except Exception:
             return None
 
-    def load_from_file(self):
-        """Initializes streams from local JSON storage."""
-        json_array = read_json_file(self.file_name)
-        if not json_array:
-            return
-            
-        for data in json_array:
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def load_from_file(self) -> None:
+        for data in read_json_file(self.storage_path):
             if isinstance(data, dict):
-                data['search_term'] = self.search_term
                 self.save(data, at_beginning=False)
 
-    async def save_to_file(self):
-        """Persists all streams to disk."""
+    async def save_to_file(self) -> None:
         self.active.order_by_time()
         self.finished.order_by_time()
-        
-        all_data = [a.dump() for a in self.get_all()]
-        await write_in_file(self.file_name, json_dumps(all_data, indent=2))
+        payload = json_dumps(
+            [a.dump() for a in self.get_all()], indent=2, ensure_ascii=False
+        )
+        await write_in_file(self.storage_path, payload)
 
-    def get_all(self) -> Stream:
+    # ------------------------------------------------------------------
+    # Queries
+    # ------------------------------------------------------------------
+
+    def get_all(self) -> List[Article]:
         return self.active + self.finished
 
-    def print_compare(self):
-        print(f'\nSummary for: {self.search_term}')
-        print(f'Total in storage: {len(self.get_all())}')
-        print(f'Currently Active: {len(self.active.get_list())}')
-        print(f'Currently Finished: {len(self.finished.get_list())}')
+    # ------------------------------------------------------------------
+    # Broadcast payload
+    # ------------------------------------------------------------------
+
+    def _article_payload(self, article: Article) -> dict:
+        """
+        Enrich the article dump with motor-level context (search_term)
+        for outbound notifications.  search_term lives here, not in the
+        stored JSON.
+        """
+        payload = article.dump()
+        payload["search_term"] = self.search_term
+        return payload
+
+    # ------------------------------------------------------------------
+    # Debug
+    # ------------------------------------------------------------------
+
+    def print_compare(self) -> None:
+        print(f"\nSummary for: {self.search_term}")
+        print(f"  Storage path:      {self.storage_path}")
+        print(f"  Total in storage:  {len(self.get_all())}")
+        print(f"  Currently active:  {len(self.active)}")
+        print(f"  Currently finished:{len(self.finished)}")
