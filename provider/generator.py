@@ -1,101 +1,72 @@
 """
 provider/generator.py
 
-Declarative Scraping Job Catalogue
-────────────────────────────────────
-All scraping jobs are expressed as plain dicts.  The only required key in
-every entry is "provider", which maps to a registered factory (see
-provider/factories.py).  Every other key is provider-specific and forwarded
-verbatim to the factory.
+Scraping Job Catalogue — YAML-driven
+──────────────────────────────────────
+All scraping jobs are declared in ``config/jobs.yaml``.  This module
+loads that file, coerces enum fields, and materialises Motor instances
+via the registry.
 
-How to read an entry
-────────────────────
-    {"provider": "ml", "search_term": "zelda wii"}
-        → MercadoLibre("zelda wii")  (default category)
+How to add or remove a job
+──────────────────────────
+Edit ``config/jobs.yaml``.  No Python file needs to change.
 
-    {"provider": "ml", "search_term": "nintendo ds", "category": Category.consolas}
-        → MercadoLibre("nintendo ds", Category.consolas)
-
-    {"provider": "lv", "search_term": "LV Laptops", "url": "https://..."}
-        → Liverpool("LV Laptops", "https://...")
-
-    {"provider": "az", "search_term": "amiibo", "seller": Seller.amazon_mx}
-        → Amazon("amiibo", Seller.amazon_mx)
-
-    {"provider": "ph", "search_term": "PH Macbook Air", "url": "https://..."}
-        → PalacioDeHierro("PH Macbook Air", "https://...")
-
-Adding or removing a job
-────────────────────────
-Edit the list below.  No other file needs to change.
-
-Adding a new provider
-─────────────────────
+How to add a new provider
+─────────────────────────
 1. Implement the Motor subclass.
 2. Register its factory in provider/factories.py.
-3. Add entries here using the new provider key.
+3. Add entries to config/jobs.yaml using the new provider key.
+
+Overriding the config path
+──────────────────────────
+Pass a different path to ``get_motors()``, e.g. for tests:
+
+    motors = get_motors(config_path="tests/fixtures/jobs.yaml")
 """
 
-from provider.mercado_libre.utils import Category
-from provider.amazon.utils import Seller
-from provider.registry import build_motors, register_entries
+from __future__ import annotations
 
-# Factories must be imported so their @_REGISTRY.factory decorators run
+import logging
+from pathlib import Path
+
+# Factories must be imported so their @_REGISTRY.factory decorators run.
 import provider.factories  # noqa: F401  (side-effect import)
 
+from provider.loader import load_jobs, DEFAULT_CONFIG_PATH
+from provider.registry import register_entries, build_motors
 from scraper.motor import Motor
 
-
-# ---------------------------------------------------------------------------
-# Job Catalogue
-# ---------------------------------------------------------------------------
-
-_ENTRIES = [
-
-    # ── MercadoLibre ────────────────────────────────────────────────────────
-    {"provider": "ml", "search_term": "fire emblem"},
-    {"provider": "ml", "search_term": "zelda wii"},
-    {"provider": "ml", "search_term": "pokemon ds"},
-    {"provider": "ml", "search_term": "nintendo ds",        "category": Category.consolas},
-    {"provider": "ml", "search_term": "nintendo switch",    "category": Category.consolas},
-    {"provider": "ml", "search_term": "lote nintendo"},
-    {"provider": "ml", "search_term": "atlas",              "category": Category.deportes_jersey},
-    {"provider": "ml", "search_term": "game cube",          "category": Category.consolas},
-    {"provider": "ml", "search_term": "game cube juegos"},
-
-    # ── Liverpool ───────────────────────────────────────────────────────────
-    {
-        "provider": "lv",
-        "search_term": "Laptops",
-        "url": "https://www.liverpool.com.mx/tienda/Laptops/N-Z6GQrU4fZmxjTFXt9XTtjADb51HPoq41uykVTx%2F8p7q4Lv5kmJ%2FB7n9SHDZAiZOr",
-    },
-    {
-        "provider": "lv",
-        "search_term": "Juegos Nintendo",
-        "url": "https://www.liverpool.com.mx/tienda/Juegos/N-Z6GQrU4fZmxjTFXt9XTtjEMtiDHLusAuxLK0y30fWRU5PhnhiYjJElHuz9EseRgf",
-    },
-
-    # ── Palacio de Hierro ───────────────────────────────────────────────────
-    {
-        "provider": "ph",
-        "search_term": "Macbook",
-        "url": "https://www.elpalaciodehierro.com/buscar?q=macbook",
-    },
-
-    # ── Amazon (examples — uncomment to activate) ───────────────────────────
-    {"provider": "az", "search_term": "macbook",      "seller": Seller.amazon_mx},
-    {"provider": "az", "search_term": "mac studio",      "seller": Seller.amazon_mx},
-    # {"provider": "az", "search_term": "pokemon tcg", "seller": Seller.amazon_mx},
-    # {"provider": "az", "search_term": "iphone",      "seller": Seller.amazon_remates},
-
-]
+logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Public API  (consumed by scrapper.py)
-# ---------------------------------------------------------------------------
+def get_motors(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[Motor]:
+    """
+    Load job entries from *config_path* and materialise every entry
+    into a Motor instance.
 
-def get_motors() -> list[Motor]:
-    """Materialise every catalogue entry into a Motor instance."""
-    register_entries(_ENTRIES)
+    Parameters
+    ----------
+    config_path:
+        Path to the YAML jobs file.  Defaults to ``config/jobs.yaml``.
+
+    Returns
+    -------
+    list[Motor]
+        One Motor per valid job entry.  Invalid entries are skipped and
+        logged by the loader / registry.
+    """
+    try:
+        entries = load_jobs(config_path)
+    except FileNotFoundError as exc:
+        logger.error("%s — returning empty motor list.", exc)
+        return []
+    except Exception as exc:
+        logger.error("Unexpected error loading jobs from '%s': %s", config_path, exc)
+        return []
+
+    if not entries:
+        logger.warning("No job entries were loaded from '%s'.", config_path)
+        return []
+
+    register_entries(entries)
     return build_motors()
