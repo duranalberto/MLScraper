@@ -22,36 +22,36 @@
 jobs:
 
   # ── MercadoLibre ──────────────────────────────────────────────────────────
-  - provider: ml
-    search_term: fire emblem
+  # - provider: ml
+  #   search_term: fire emblem
 
-  - provider: ml
-    search_term: zelda wii
+  # - provider: ml
+  #   search_term: zelda wii
 
-  - provider: ml
-    search_term: pokemon ds
+  # - provider: ml
+  #   search_term: pokemon ds
 
-  - provider: ml
-    search_term: nintendo ds
-    category: consolas
+  # - provider: ml
+  #   search_term: nintendo ds
+  #   category: consolas
 
-  - provider: ml
-    search_term: nintendo switch
-    category: consolas
+  # - provider: ml
+  #   search_term: nintendo switch
+  #   category: consolas
 
-  - provider: ml
-    search_term: lote nintendo
+  # - provider: ml
+  #   search_term: lote nintendo
 
-  - provider: ml
-    search_term: atlas
-    category: deportes_jersey
+  # - provider: ml
+  #   search_term: atlas
+  #   category: deportes_jersey
 
-  - provider: ml
-    search_term: game cube
-    category: consolas
+  # - provider: ml
+  #   search_term: game cube
+  #   category: consolas
 
-  - provider: ml
-    search_term: game cube juegos
+  # - provider: ml
+  #   search_term: game cube juegos
 
   # ── Liverpool ─────────────────────────────────────────────────────────────
   - provider: lv

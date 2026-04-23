@@ -136,12 +136,17 @@ class Article:
         if not changes:
             return False
 
+        # Snapshot OLD values before overwriting — history records what changed FROM,
+        # not what it changed TO. Without this, setattr() runs first and the history
+        # entry ends up storing the new (current) price instead of the previous one.
+        old_values = {k: getattr(self, k) for k in changes}
+
         for k, v in changes.items():
             setattr(self, k, v)
 
         is_first = not self.history
-        changes["datetime"] = self.datetime if is_first else self.last_updated
-        ah = ArticleHistory.create(changes)
+        history_entry = {**old_values, "datetime": self.datetime if is_first else self.last_updated}
+        ah = ArticleHistory.create(history_entry)
         if ah:
             self.last_updated = str(datetime_lib.now())
             self.history.insert(0, ah)
