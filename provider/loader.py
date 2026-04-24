@@ -47,20 +47,10 @@ from provider.mercado_libre.utils import Category
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# Providers that require an explicit `url` field.
 _URL_REQUIRED_PROVIDERS = {"lv", "ph"}
 
-# Default config path (relative to project root).
 DEFAULT_CONFIG_PATH = Path("config/jobs.yaml")
 
-
-# ---------------------------------------------------------------------------
-# Enum coercion
-# ---------------------------------------------------------------------------
 
 def _coerce_category(raw: str, entry: dict) -> Category | None:
     """Convert a category string to a Category enum member, or return None on error."""
@@ -91,10 +81,6 @@ def _coerce_seller(raw: str, entry: dict) -> Seller | None:
         )
         return None
 
-
-# ---------------------------------------------------------------------------
-# Entry validation & coercion
-# ---------------------------------------------------------------------------
 
 def _validate_and_coerce(entry: Any, index: int) -> dict | None:
     """
@@ -128,10 +114,8 @@ def _validate_and_coerce(entry: Any, index: int) -> dict | None:
         )
         return None
 
-    # Work on a shallow copy so we never mutate the raw YAML data.
     clean: dict = dict(entry)
 
-    # Coerce `category` string → Category enum
     if "category" in clean:
         coerced = _coerce_category(str(clean["category"]), entry)
         if coerced is None:
@@ -150,10 +134,6 @@ def _validate_and_coerce(entry: Any, index: int) -> dict | None:
 
     return clean
 
-
-# ---------------------------------------------------------------------------
-# Public loader
-# ---------------------------------------------------------------------------
 
 def load_jobs(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[dict]:
     """

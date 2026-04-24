@@ -1,14 +1,5 @@
 """
-scrapper.py
-
 Orchestrator — runs all motors on a schedule and routes broadcast events.
-
-Changes
-───────
-• Motor.scrape() now calls motor._article_payload(article) before broadcasting,
-  which injects `search_term` into the outbound payload at the last moment.
-  The field is no longer stored in JSON; it only travels over the wire.
-• scrapper.get_list() no longer accesses article.search_term.
 """
 
 import asyncio
@@ -21,76 +12,102 @@ from provider.generator import get_motors
 from scraper.motor import Motor
 from utils.telegram import send_new_to_telegram, send_price_drop_to_telegram
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+MAX_CONCURRENT_MOTORS = 5
+_BACKOFF_INITIAL = 30
+_BACKOFF_MAX     = 3600
 
 
 class Scrapper:
     def __init__(self, caller: Optional[Callable] = None):
         self.sleep_time = 400
+        self.caller     = caller
+        self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_MOTORS)
+
         self.motors: list[Motor] = get_motors()
-        self.caller = caller
+        if not self.motors:
+            logger.critical(
+                "No motors were loaded. Check config/jobs.yaml and provider factories. "
+                "The scraper will idle until restarted with a valid config."
+            )
+        else:
+            logger.info("Scrapper ready with %d motor(s).", len(self.motors))
+
 
     def get_list(self) -> list[dict]:
-        """Returns a snapshot of current active elements for the /api/search endpoint."""
         return [
             {
-                'title': motor.search_term,
-                'elements': [motor._article_payload(a) for a in motor.active],
+                "title":    motor.search_term,
+                "elements": [motor._article_payload(a) for a in motor.active],
             }
             for motor in self.motors
         ]
 
-    async def run(self):
-        """Main scraping loop."""
-        logging.info("Scraper service started.")
+    async def run(self) -> None:
+        if not self.motors:
+            logger.warning("Scraper run() has no motors — idling. Restart with a valid config.")
+            while True:
+                await asyncio.sleep(3600)
+
+        logger.info("Scraper service started.")
+        backoff = _BACKOFF_INITIAL
+
         while True:
             start_time = time()
             try:
-                await asyncio.gather(*[
-                    motor.scrape(caller=self._broadcast, silent=True)
-                    for motor in self.motors
-                ])
-                duration = time() - start_time
-                status_msg = f"Scraping cycle finished in {duration:.2f} seconds."
-                logging.info(status_msg)
+                await asyncio.gather(
+                    *[self._scrape_with_limit(motor) for motor in self.motors]
+                )
+                duration   = time() - start_time
+                backoff    = _BACKOFF_INITIAL
+                status_msg = f"Scraping cycle finished in {duration:.2f}s."
+                logger.info(status_msg)
                 await self._broadcast_scrape_finished(status_msg)
-            except Exception as e:
-                logging.error(f"Error during scraping cycle: {e}")
+
+            except Exception as exc:
+                logger.error("Error during scraping cycle: %s", exc)
+                logger.info("Backing off for %ds before retrying.", backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, _BACKOFF_MAX)
+                continue
 
             await asyncio.sleep(self.sleep_time)
 
-    async def _broadcast(self, broadcast_type: str, element: dict, msj: str = '', broadcast: bool = False):
-        """Routes broadcast events to specific handlers."""
-        if broadcast:
-            return
-        if broadcast_type == 'new_element':
+
+    async def _scrape_with_limit(self, motor: Motor) -> None:
+        async with self._semaphore:
+            await motor.scrape(caller=self._broadcast, silent=True)
+
+    async def _broadcast(self, broadcast_type: str, element: dict) -> None:
+        if broadcast_type == "new_element":
             await self._broadcast_new_element(element)
-        elif broadcast_type == 'is_updated':
+        elif broadcast_type == "is_updated":
             await self._broadcast_is_updated(element)
+        else:
+            logger.warning("Unknown broadcast_type '%s' — ignored.", broadcast_type)
 
-    async def _broadcast_new_element(self, element: dict):
-        """Handles notification for brand new elements found."""
-        response = {'message': 'new element', 'payload': element}
-        send_new_to_telegram(element)
+    async def _broadcast_new_element(self, element: dict) -> None:
+        response = {"message": "new element", "payload": element}
+        await send_new_to_telegram(element)
         if self.caller:
-            await self.caller(json_dumps(response))
+            try:
+                await self.caller(json_dumps(response))
+            except Exception as exc:
+                logger.error("WebSocket broadcast failed (new_element): %s", exc)
 
-    def _parse_price(self, price_val: Any) -> float:
-        """Safely convert price strings/numbers to float."""
-        if isinstance(price_val, (int, float)):
-            return float(price_val)
-        if isinstance(price_val, str):
-            return float(price_val.replace(',', ''))
-        return 0.0
-
-    async def _broadcast_is_updated(self, element: dict):
-        """Logic to handle price drops or data updates."""
-        history = element.get('history', [])
-        if not history or 'price' not in history[0]:
+    async def _broadcast_is_updated(self, element: dict) -> None:
+        history = element.get("history", [])
+        if not history or "price" not in history[0]:
             return
 
-        last_value = self._parse_price(history[0]['price'])
-        new_value = self._parse_price(element.get('price', 0))
+        last_value = self._parse_price(history[0]["price"])
+        new_value  = self._parse_price(element.get("price"))
+
+        if last_value is None or new_value is None:
+            logger.debug("Skipping price-drop check for '%s': unparseable price value.", element.get("title", "<unknown>"))
+            return
 
         if last_value <= 0:
             return
@@ -98,21 +115,42 @@ class Scrapper:
         percent_change = ((new_value - last_value) / abs(last_value)) * 100
 
         if percent_change <= -14:
-            element['percent_change'] = f"{abs(percent_change):.2f}"
-            logging.info(f"PRICE DROP: {element.get('title')} ({element['percent_change']}%) - {element.get('url')}")
-            send_price_drop_to_telegram(element)
+            element["percent_change"] = f"{abs(percent_change):.2f}"
+            logger.info("PRICE DROP: %s (%s%%) — %s", element.get("title"), element["percent_change"], element.get("url"))
+            await send_price_drop_to_telegram(element)
             if self.caller:
-                await self.caller(json_dumps({'message': 'price drop', 'payload': element}))
+                try:
+                    await self.caller(json_dumps({"message": "price drop", "payload": element}))
+                except Exception as exc:
+                    logger.error("WebSocket broadcast failed (price_drop): %s", exc)
 
-    async def _broadcast_scrape_finished(self, status_text: str):
-        """Notifies caller that a full cycle is complete."""
+    async def _broadcast_scrape_finished(self, status_text: str) -> None:
         if self.caller:
-            await self.caller(json_dumps({'message': 'scrape status', 'payload': status_text}))
+            try:
+                await self.caller(json_dumps({"message": "scrape status", "payload": status_text}))
+            except Exception as exc:
+                logger.error("WebSocket broadcast failed (scrape_status): %s", exc)
+
+    @staticmethod
+    def _parse_price(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").strip()
+            if not cleaned:
+                return None
+            try:
+                return float(cleaned)
+            except ValueError:
+                return None
+        return None
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     scraper = Scrapper()
     try:
         asyncio.run(scraper.run())
     except KeyboardInterrupt:
-        logging.info("Scraper stopped by user.")
+        logger.info("Scraper stopped by user.")

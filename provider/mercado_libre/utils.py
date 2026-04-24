@@ -4,9 +4,7 @@ import urllib.parse
 from enum import Enum
 
 _urls = {
-    # Standard article base
     'article_prefix': 'https://articulo.mercadolibre.com.mx/',
-    # Catalog item base
     'catalog_prefix': 'https://www.mercadolibre.com.mx/up/',
     'base_search': 'https://listado.mercadolibre.com.mx',
 }
@@ -23,7 +21,6 @@ class Category(Enum):
     iphone_once_pro_usado = 'https://listado.mercadolibre.com.mx/celulares-telefonia/celulares-smartphones/usados/iphone-11-pro_NoIndex_True'
     iphone_se_usado = 'https://listado.mercadolibre.com.mx/celulares-telefonia/celulares-smartphones/usados/iphone-se_NoIndex_True'
 
-    # NOTE: this is now treated as a TEMPLATE, not a fixed URL
     apple_official = '_CustId_527927603_BRAND_9344_NoIndex_True'
 
 
@@ -42,7 +39,6 @@ def get_identifier(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     qs = urllib.parse.parse_qs(parsed.query)
 
-    # Preferred: wid param (most reliable in search cards)
     wid = qs.get('wid', [''])[0]
     if wid:
         return wid
@@ -75,7 +71,6 @@ def construct_url_from_identifier(identifier: str) -> str:
 def construct_search_url(search_term: str, category: Category = Category.none) -> str:
     base = _urls['base_search']
 
-    # Hardcoded fixed pages (do NOT inject query)
     hardcoded_categories = {
         Category.iphone_trece_pro_usado,
         Category.iphone_once_pro_usado,
@@ -87,15 +82,12 @@ def construct_search_url(search_term: str, category: Category = Category.none) -
 
     slug = _slugify(search_term)
 
-    # 🔴 FIX: apple_official must use ML permalink pattern
     if category == Category.apple_official:
         path = f"{slug}_{category.value}"
         return f"{base}/{path}?sb=seller_id#D[A:{slug}]"
 
-    # Default search (no category)
     if category == Category.none:
         return f"{base}/{slug}_NoIndex_True"
 
-    # Category-based search
     category_path = category.value.rstrip('/')
     return f"{base}{category_path}/{slug}_NoIndex_True"

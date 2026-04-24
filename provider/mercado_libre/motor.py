@@ -7,13 +7,7 @@ from .utils import Category, get_identifier, construct_search_url
 
 class MercadoLibre(Motor):
 
-    def __init__(
-        self,
-        search_term: str,
-        category: Category = Category.consolas_videojuegos,
-        *,
-        storage_path: str,
-    ):
+    def __init__(self, search_term: str, category: Category = Category.consolas_videojuegos, *, storage_path: str):
         super().__init__(search_term, construct_search_url(search_term, category), storage_path=storage_path)
 
     def scrape_page(self, body):
@@ -51,11 +45,18 @@ class MercadoLibre(Motor):
                     '.ui-search-price__second-line .andes-money-amount__fraction, '
                     '.andes-money-amount__fraction'
                 )
+                
+                raw_price = price_span.get_text(strip=True) if price_span else '0'
+                price_str = raw_price.replace(',', '').strip()
+                try:
+                    price_val = float(price_str) if price_str else 0.0
+                except ValueError:
+                    price_val = 0.0
 
                 items.append({
                     'identifier': identifier,
                     'title': link_tag.get_text(' ', strip=True),
-                    'price': price_span.get_text(strip=True) if price_span else '0',
+                    'price': price_val,
                     'url': clean_url,
                 })
             except Exception as e:
@@ -113,7 +114,6 @@ class MercadoLibre(Motor):
         from urllib.parse import urlparse, urlunparse
         parsed = urlparse(current_url)
         path = parsed.path
-
         if re.search(r'_Desde_\d+', path):
             path = re.sub(r'_Desde_\d+', f'_Desde_{next_offset}', path, count=1)
         elif path.startswith('/_CustId_'):
@@ -122,5 +122,4 @@ class MercadoLibre(Motor):
             path = path.replace('_NoIndex_True', f'_Desde_{next_offset}_NoIndex_True', 1)
         else:
             path = f'{path}_Desde_{next_offset}'
-
         return urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, parsed.query, parsed.fragment))

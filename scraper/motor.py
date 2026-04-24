@@ -1,36 +1,3 @@
-"""
-scraper/motor.py
-
-Motor — abstract base for all scrapers.
-
-Storage changes
-───────────────
-• Motors no longer derive their storage path from `search_term`.
-  Instead they receive an explicit `storage_path` (e.g.
-  "mercado_libre/zelda-wii.json") injected by the factory in
-  provider/factories.py.  This eliminates:
-    – flat-root collisions between providers
-    – collisions between same-term/different-filter jobs
-      (e.g. ML "nintendo ds" consolas vs ML "nintendo ds" videojuegos)
-    – Amazon's ad-hoc name building (f'AZ {seller} - {term}')
-
-• `search_term` is still stored on the Motor for display / broadcast
-  purposes (Telegram messages, scraper logs, WebSocket payloads) but
-  it is no longer used for anything storage-related.
-
-• `load_from_file` no longer patches `data['search_term']` into each
-  record — the field no longer exists on Article.
-
-• `save_to_file` writes to `self.storage_path` (a relative path under
-  data/).
-
-Article changes
-───────────────
-• Article.create / is_valid_args no longer require 'search_term'.
-• Article.dump no longer emits 'search_term'.
-  See scraper/article.py for details.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -56,21 +23,17 @@ class Motor(ABC):
         self,
         search_term: str,
         url: str,
-        storage_path: str,      # e.g. "mercado_libre/zelda-wii.json"
+        storage_path: str,
         debug: bool = True,
     ) -> None:
         self.search_term  = search_term
         self.url          = url
-        self.storage_path = storage_path   # relative path under data/
+        self.storage_path = storage_path
         self.active       = Stream(Status.active)
         self.finished     = Stream(Status.finished)
         self.debug        = debug
 
         self.load_from_file()
-
-    # ------------------------------------------------------------------
-    # HTTP
-    # ------------------------------------------------------------------
 
     async def _fetch(
         self,
@@ -94,10 +57,6 @@ class Motor(ABC):
                 await asyncio.sleep(0.5 * (2 ** attempt))
 
         return None
-
-    # ------------------------------------------------------------------
-    # Scrape orchestration
-    # ------------------------------------------------------------------
 
     async def scrape(
         self,
@@ -166,10 +125,7 @@ class Motor(ABC):
                 "Scrape for '%s' crashed:\n%s", self.search_term, format_exc()
             )
             return
-
-        # ------------------------------------------------------------------
-        # Post-processing
-        # ------------------------------------------------------------------
+        
         if results or self.active.get_list():
             deleted = self.active - results
             for d in deleted:
@@ -184,19 +140,11 @@ class Motor(ABC):
                     len(results),
                 )
 
-    # ------------------------------------------------------------------
-    # Abstract interface
-    # ------------------------------------------------------------------
-
     @abstractmethod
     def scrape_page(
         self, body: dict
     ) -> Tuple[List[Any], Optional[str]]:
         """Return (items_list, next_page_url_or_None)."""
-
-    # ------------------------------------------------------------------
-    # Article lifecycle
-    # ------------------------------------------------------------------
 
     def save(
         self,
@@ -244,10 +192,6 @@ class Motor(ABC):
         except Exception:
             return None
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
     def load_from_file(self) -> None:
         for data in read_json_file(self.storage_path):
             if isinstance(data, dict):
@@ -261,16 +205,8 @@ class Motor(ABC):
         )
         await write_in_file(self.storage_path, payload)
 
-    # ------------------------------------------------------------------
-    # Queries
-    # ------------------------------------------------------------------
-
     def get_all(self) -> List[Article]:
         return self.active + self.finished
-
-    # ------------------------------------------------------------------
-    # Broadcast payload
-    # ------------------------------------------------------------------
 
     def _article_payload(self, article: Article) -> dict:
         """
@@ -281,10 +217,6 @@ class Motor(ABC):
         payload = article.dump()
         payload["search_term"] = self.search_term
         return payload
-
-    # ------------------------------------------------------------------
-    # Debug
-    # ------------------------------------------------------------------
 
     def print_compare(self) -> None:
         print(f"\nSummary for: {self.search_term}")

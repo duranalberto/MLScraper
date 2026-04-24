@@ -34,11 +34,8 @@ class Stream:
         Allows: delta = stream_a - list_of_articles
         Returns a list of items in self that are NOT in other.
         """
-        # Improved to avoid set() hashing issues with Article objects
         other_list = other.get_list() if isinstance(other, Stream) else other
         return [item for item in self._list if item not in other_list]
-
-    # --- DATA MANAGEMENT ---
 
     def add(self, article: Article, at_beginning: bool = False) -> Optional[Article]:
         if article:
@@ -67,7 +64,6 @@ class Stream:
 
     def delete(self, article: Article) -> Optional[Article]:
         if article in self._list:
-            # We fetch the exact object reference from the list before removing
             to_remove = self._list[self._list.index(article)]
             self._list.remove(to_remove)
             return to_remove
@@ -75,8 +71,6 @@ class Stream:
 
     def clear(self):
         self._list.clear()
-
-    # --- UTILS ---
 
     def get_list(self) -> List[Article]:
         return self._list

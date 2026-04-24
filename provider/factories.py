@@ -1,32 +1,3 @@
-"""
-provider/factories.py
-
-Provider Factories + Storage Path Strategy
-───────────────────────────────────────────
-Each factory is the single place that knows:
-  1. How to construct a Motor (which args, which class).
-  2. What the canonical storage path for that job should be.
-
-Storage path rules
-──────────────────
-Pattern:  <provider>/<slug>[__<qualifier>].json
-
-• <provider>   — short provider identifier ("mercado_libre", "amazon", …)
-• <slug>       — URL-safe, lowercase, hyphen-separated search term
-• <qualifier>  — optional suffix that makes jobs with the same search_term
-                 but different filters distinguishable, e.g.:
-                   ml: category name  →  nintendo-ds__consolas.json
-                   az: seller name    →  iphone__amazon-mx.json
-                 Jobs with no filter get no qualifier:
-                   ml "amiibo" (default category) → amiibo.json
-
-This ensures:
-  • No flat-root collisions — each provider has its own sub-directory.
-  • No same-term/different-filter collisions — qualifier encodes the filter.
-  • Filenames are human-readable without opening the file.
-  • No UUID / hash tricks needed.
-"""
-
 from __future__ import annotations
 
 import re
@@ -40,10 +11,6 @@ from provider.mercado_libre.motor import MercadoLibre
 from provider.mercado_libre.utils import Category
 from provider.palacio_de_hierro.motor import PalacioDeHierro
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _slug(text: str) -> str:
     """
@@ -73,10 +40,6 @@ def _storage_path(provider: str, search_term: str, qualifier: str = "") -> str:
     return f"{provider}/{name}.json"
 
 
-# ---------------------------------------------------------------------------
-# MercadoLibre
-# ---------------------------------------------------------------------------
-
 @_REGISTRY.factory("ml")
 def _ml_factory(
     search_term: str,
@@ -100,10 +63,6 @@ def _ml_factory(
     return MercadoLibre(search_term, category, storage_path=path)
 
 
-# ---------------------------------------------------------------------------
-# Amazon
-# ---------------------------------------------------------------------------
-
 @_REGISTRY.factory("az")
 def _az_factory(
     search_term: str,
@@ -123,10 +82,6 @@ def _az_factory(
     return Amazon(search_term, seller, storage_path=path)
 
 
-# ---------------------------------------------------------------------------
-# Liverpool
-# ---------------------------------------------------------------------------
-
 @_REGISTRY.factory("lv")
 def _lv_factory(search_term: str, url: str, **_) -> Liverpool:
     """
@@ -140,10 +95,6 @@ def _lv_factory(search_term: str, url: str, **_) -> Liverpool:
     path = _storage_path("liverpool", search_term)
     return Liverpool(search_term, url, storage_path=path)
 
-
-# ---------------------------------------------------------------------------
-# Palacio de Hierro
-# ---------------------------------------------------------------------------
 
 @_REGISTRY.factory("ph")
 def _ph_factory(search_term: str, url: str, **_) -> PalacioDeHierro:

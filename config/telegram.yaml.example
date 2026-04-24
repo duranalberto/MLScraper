@@ -1,0 +1,13 @@
+# Telegram notification credentials
+# ───────────────────────────────────
+# Copy this file to config/telegram.yaml and fill in your values.
+# config/telegram.yaml is gitignored — never commit the real file.
+#
+# How to get these values:
+#   api_token  →  create a bot via @BotFather on Telegram, copy the token it gives you
+#   chat_id    →  send a message to your bot, then visit:
+#                 https://api.telegram.org/bot<TOKEN>/getUpdates
+#                 and copy the "chat":{"id": ...} value
+
+api_token: ""
+chat_id: ""

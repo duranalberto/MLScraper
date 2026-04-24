@@ -12,7 +12,6 @@ class Amazon(Motor):
         self.search_term = search_term
         formatted_query = urllib.parse.quote_plus(search_term.lower())
         url = f'{self.DOMAIN}/s?k={formatted_query}{seller.filter_query}'
-        # search_term is the human-readable label; storage_path is injected by the factory
         super().__init__(search_term, url, storage_path=storage_path)
 
     def scrape_page(self, body: dict):
