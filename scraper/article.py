@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
 from datetime import datetime as datetime_lib
-from typing import Any, Dict, List, Optional, Self
+from typing import Any, Dict, List, Optional
 
 from .status import Status
+
+MAX_HISTORY = 100
 
 
 @dataclass
@@ -94,18 +96,24 @@ class Article:
 
         if not changes:
             return False
-        
+
         old_values = {k: getattr(self, k) for k in changes}
+        original_datetime = self.datetime
+        previous_last_updated = self.last_updated
 
         for k, v in changes.items():
             setattr(self, k, v)
 
         is_first = not self.history
-        history_entry = {**old_values, "datetime": self.datetime if is_first else self.last_updated}
+        history_entry = {
+            **old_values,
+            "datetime": original_datetime if is_first or previous_last_updated is None else previous_last_updated,
+        }
         ah = ArticleHistory.create(history_entry)
         if ah:
             self.last_updated = str(datetime_lib.now())
             self.history.insert(0, ah)
+            self.history = self.history[:MAX_HISTORY]
 
         return True
 
@@ -121,7 +129,7 @@ class Article:
             "price":      self.price,
             "url":        self.url,
             "datetime":   str(self.datetime),
-            "status":     self.status,
+            "status":     self.status.value,
         }
         if self.history:
             d["last_updated"] = self.last_updated

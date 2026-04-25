@@ -7,13 +7,19 @@ All callers pass a relative path such as "mercado_libre/zelda-wii.json";
 this module ensures the parent directory exists before every write.
 """
 
-import json
 import asyncio
+import json
+import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Union, List, Dict
 
-DATA_PATH = Path("./data")
+logger = logging.getLogger(__name__)
+
+DATA_PATH = Path(os.environ.get("DATA_PATH", "./data"))
+_TMP_SUFFIX = ".tmp"
+_BACKUP_SUFFIX = ".bak"
 
 
 def _resolve(relative_path: str) -> Path:
@@ -32,7 +38,17 @@ def write_in_file_sync(relative_path: str, content: str) -> None:
         return
     path = _resolve(relative_path)
     _ensure_parent(path)
-    path.write_text(content, encoding="utf-8")
+    tmp_path = path.with_name(f"{path.name}{_TMP_SUFFIX}")
+    backup_path = path.with_name(f"{path.name}{_BACKUP_SUFFIX}")
+
+    if path.exists():
+        try:
+            shutil.copy2(path, backup_path)
+        except Exception as exc:
+            logger.warning("Failed to create backup '%s': %s", backup_path, exc)
+
+    tmp_path.write_text(content, encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 async def write_in_file(relative_path: str, content: str) -> None:
@@ -52,16 +68,18 @@ def read_json_file(relative_path: str) -> Union[List, Dict]:
         return []
 
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            logger.error(
+                "Invalid JSON root in '%s' — expected a list, got %s.",
+                path,
+                type(data).__name__,
+            )
+            return []
+        return data
     except json.JSONDecodeError:
-        import logging
-        logging.getLogger(__name__).error(
-            "Invalid JSON in '%s' — returning empty list.", path
-        )
+        logger.error("Invalid JSON in '%s' — returning empty list.", path)
         return []
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).error(
-            "Unexpected error reading '%s': %s", path, exc
-        )
+        logger.error("Unexpected error reading '%s': %s", path, exc)
         return []

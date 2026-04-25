@@ -1,12 +1,14 @@
+import logging
 import re
 import json
 from bs4 import BeautifulSoup
 from scraper.motor import Motor
 from .utils import Category, get_identifier, construct_search_url
 
+logger = logging.getLogger(__name__)
+
 
 class MercadoLibre(Motor):
-
     def __init__(self, search_term: str, category: Category = Category.consolas_videojuegos, *, storage_path: str):
         super().__init__(search_term, construct_search_url(search_term, category), storage_path=storage_path)
 
@@ -61,7 +63,7 @@ class MercadoLibre(Motor):
                 })
             except Exception as e:
                 if self.debug:
-                    print(f'Error parsing item: {e}')
+                    logger.exception("Error parsing item in '%s': %s", self.search_term, e)
                 continue
 
         page_size = self._get_page_size(soup, items)
@@ -85,7 +87,7 @@ class MercadoLibre(Motor):
         return len(items) if items else 50
 
     def _next_url(self, current_url: str, items_on_page: int, page_size: int, soup: BeautifulSoup):
-        if items_on_page < page_size:
+        if items_on_page <= 0:
             return None
         if not self._has_next_page(soup):
             return None

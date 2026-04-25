@@ -1,6 +1,10 @@
+import logging
 from typing import List, Optional
+
 from .status import Status
 from .article import Article
+
+logger = logging.getLogger(__name__)
 
 class Stream:
     def __init__(self, status: Status = Status.none, _list: Optional[List[Article]] = None):
@@ -53,7 +57,6 @@ class Stream:
         if article and article in self._list:
             index = self._list.index(article)
             target = self._list[index]
-            # Assumes Article.update returns True if data actually changed
             was_updated = target.update({'title': article.title, 'price': article.price})
             return target if was_updated else None
         return None
@@ -81,4 +84,4 @@ class Stream:
 
     def print_(self):
         for e in self._list:
-            print(f"{e.title} - {e.status}")
+            logger.info("%s - %s", e.title, e.status)

@@ -5,8 +5,12 @@ Orchestrator — runs all motors on a schedule and routes broadcast events.
 import asyncio
 import logging
 from json import dumps as json_dumps
-from time import time
+from functools import lru_cache
+from pathlib import Path
+from time import gmtime, strftime, time
 from typing import Optional, Callable, Any
+
+import yaml
 
 from provider.generator import get_motors
 from scraper.motor import Motor
@@ -14,19 +18,55 @@ from utils.telegram import send_new_to_telegram, send_price_drop_to_telegram
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "scrapper.yaml"
 
-MAX_CONCURRENT_MOTORS = 5
-_BACKOFF_INITIAL = 30
-_BACKOFF_MAX     = 3600
+
+@lru_cache(maxsize=1)
+def _load_scrapper_config() -> dict[str, Any]:
+    if not _CONFIG_PATH.exists():
+        raise FileNotFoundError(
+            f"Scrapper config file not found: '{_CONFIG_PATH.resolve()}'. "
+            "Create config/scrapper.yaml to define orchestration policy values."
+        )
+
+    with _CONFIG_PATH.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"'{_CONFIG_PATH}' must contain a YAML mapping at the top level."
+        )
+
+    required = ("MAX_CONCURRENT_MOTORS", "BACKOFF_INITIAL", "BACKOFF_MAX")
+    missing = [key for key in required if key not in data]
+    if missing:
+        raise KeyError(
+            f"Missing required scrapper config key(s) {missing!r} in '{_CONFIG_PATH}'."
+        )
+
+    return data
+
+
+_SCRAPPER_CONFIG = _load_scrapper_config()
+MAX_CONCURRENT_MOTORS = int(_SCRAPPER_CONFIG["MAX_CONCURRENT_MOTORS"])
+_BACKOFF_INITIAL = int(_SCRAPPER_CONFIG["BACKOFF_INITIAL"])
+_BACKOFF_MAX = int(_SCRAPPER_CONFIG["BACKOFF_MAX"])
 
 
 class Scrapper:
     def __init__(self, caller: Optional[Callable] = None):
         self.sleep_time = 400
         self.caller     = caller
-        self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_MOTORS)
 
         self.motors: list[Motor] = get_motors()
+        self._domain_semaphores: dict[str, asyncio.Semaphore] = {}
+        self._domain_limits: dict[str, int] = {}
+        self.health: dict[str, Any] = {
+            "status": "starting",
+            "last_cycle_finished_at": None,
+            "last_cycle_duration_s": None,
+            "motor_count": len(self.motors),
+        }
         if not self.motors:
             logger.critical(
                 "No motors were loaded. Check config/jobs.yaml and provider factories. "
@@ -47,11 +87,13 @@ class Scrapper:
 
     async def run(self) -> None:
         if not self.motors:
+            self.health["status"] = "idle_no_motors"
             logger.warning("Scraper run() has no motors — idling. Restart with a valid config.")
             while True:
                 await asyncio.sleep(3600)
 
         logger.info("Scraper service started.")
+        self.health["status"] = "running"
         backoff = _BACKOFF_INITIAL
 
         while True:
@@ -63,10 +105,18 @@ class Scrapper:
                 duration   = time() - start_time
                 backoff    = _BACKOFF_INITIAL
                 status_msg = f"Scraping cycle finished in {duration:.2f}s."
+                self.health.update(
+                    {
+                        "status": "ok",
+                        "last_cycle_finished_at": strftime("%Y-%m-%dT%H:%M:%SZ", gmtime()),
+                        "last_cycle_duration_s": round(duration, 2),
+                    }
+                )
                 logger.info(status_msg)
                 await self._broadcast_scrape_finished(status_msg)
 
             except Exception as exc:
+                self.health["status"] = "error"
                 logger.error("Error during scraping cycle: %s", exc)
                 logger.info("Backing off for %ds before retrying.", backoff)
                 await asyncio.sleep(backoff)
@@ -77,8 +127,25 @@ class Scrapper:
 
 
     async def _scrape_with_limit(self, motor: Motor) -> None:
-        async with self._semaphore:
+        async with self._get_domain_semaphore(motor.domain, motor.CONCURRENCY_LIMIT):
             await motor.scrape(caller=self._broadcast, silent=True)
+
+    def _get_domain_semaphore(self, domain: str, limit: int | None) -> asyncio.Semaphore:
+        if limit is None:
+            limit = MAX_CONCURRENT_MOTORS
+
+        semaphore = self._domain_semaphores.get(domain)
+        if semaphore is None:
+            self._domain_semaphores[domain] = asyncio.Semaphore(limit)
+            self._domain_limits[domain] = limit
+        elif self._domain_limits.get(domain) != limit:
+            logger.warning(
+                "Domain '%s' requested concurrency %d but already has %d; keeping the first configured value.",
+                domain,
+                limit,
+                self._domain_limits.get(domain, limit),
+            )
+        return self._domain_semaphores[domain]
 
     async def _broadcast(self, broadcast_type: str, element: dict) -> None:
         if broadcast_type == "new_element":
