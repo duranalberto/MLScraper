@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    ports:
+      - "80:80"
+    environment:
+      DATA_PATH: /MLScraper/data
+    volumes:
+      - ./data:/MLScraper/data
