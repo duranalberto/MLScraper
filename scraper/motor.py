@@ -50,6 +50,7 @@ class Motor(ABC):
     RATE_LIMIT_SLEEP_CAP: int | None = None
     BLOCKED_BACKOFF_SECONDS: int | None = None
     CONCURRENCY_LIMIT: int | None = None
+    HOLD_MISS_THRESHOLD: int = 3
 
     def __init__(
         self,
@@ -62,6 +63,7 @@ class Motor(ABC):
         self.url          = url
         self.storage_path = storage_path
         self.active       = Stream(Status.active)
+        self.on_hold      = Stream(Status.on_hold)
         self.finished     = Stream(Status.finished)
         self.debug        = debug
         self.blocked_until: float = 0.0
@@ -263,10 +265,8 @@ class Motor(ABC):
             )
             return
         
-        if results or self.active.get_list():
-            deleted = self.active - results
-            for d in deleted:
-                self.save(d, to_status=Status.finished)
+        if results or self.active.get_list() or self.on_hold.get_list():
+            self._reconcile_missing(results)
 
             await self.save_to_file()
 
@@ -363,20 +363,67 @@ class Motor(ABC):
 
         if target == Status.active:
             previously_finished = self.finished.delete(article)
+            previously_on_hold = self.on_hold.delete(article)
 
-            if article not in self.active and previously_finished is None:
+            if previously_finished is not None:
+                previously_finished.record_status_history(Status.finished)
+                previously_finished.hold_misses = 0
+                updated = previously_finished.update({"title": article.title, "price": article.price})
+                article = previously_finished
+                if updated:
+                    is_updated = True
+                if article not in self.active:
+                    self.active.add(article, at_beginning)
+                return article, is_new, is_updated
+
+            if previously_on_hold is not None:
+                previously_on_hold.hold_misses = 0
+                updated = previously_on_hold.update({"title": article.title, "price": article.price})
+                article = previously_on_hold
+                if updated:
+                    is_updated = True
+                if article not in self.active:
+                    self.active.add(article, at_beginning)
+                return article, is_new, is_updated
+
+            if article not in self.active:
                 self.active.add(article, at_beginning)
                 is_new = True
             else:
-                existing = previously_finished if previously_finished is not None else article
-                updated = self.active.update(existing)
+                updated = self.active.update(article)
                 if self.is_article(updated):
                     article = updated
                     is_updated = True
 
         elif target == Status.finished:
-            removed = self.active.delete(article)
-            self.finished.add(removed or article)
+            removed_hold = self.on_hold.delete(article)
+            removed_active = self.active.delete(article) if removed_hold is None else None
+            existing = removed_hold or removed_active or article
+            existing.hold_misses = 0
+            existing.record_status_history(Status.finished)
+            self.finished.add(existing)
+            article = existing
+
+        elif target == Status.on_hold:
+            removed_active = self.active.delete(article)
+            if removed_active is not None:
+                removed_active.hold_misses = 1
+                self.on_hold.add(removed_active, at_beginning)
+                return removed_active, is_new, is_updated
+
+            removed_hold = self.on_hold.delete(article)
+            if removed_hold is not None:
+                removed_hold.hold_misses = removed_hold.hold_misses + 1 if removed_hold.hold_misses else 1
+                if removed_hold.hold_misses >= self.HOLD_MISS_THRESHOLD:
+                    removed_hold.record_status_history(Status.finished)
+                    removed_hold.hold_misses = 0
+                    self.finished.add(removed_hold, at_beginning)
+                    return removed_hold, is_new, is_updated
+                self.on_hold.add(removed_hold, at_beginning)
+                return removed_hold, is_new, is_updated
+
+            article.hold_misses = 1
+            self.on_hold.add(article, at_beginning)
 
         return article, is_new, is_updated
 
@@ -408,8 +455,17 @@ class Motor(ABC):
                     continue
                 seen_identifiers.add(identifier)
                 status_value = data.get("status")
-                to_status = Status.finished if status_value == Status.finished.value else Status.active
-                self.save(data, to_status=to_status, at_beginning=False)
+                article = self.create_article(data)
+                if not article:
+                    continue
+                if status_value == Status.finished.value:
+                    article.hold_misses = 0
+                    self.finished.add(article, at_beginning=False)
+                elif status_value == Status.on_hold.value:
+                    article.hold_misses = article.hold_misses or 1
+                    self.on_hold.add(article, at_beginning=False)
+                else:
+                    self.active.add(article, at_beginning=False)
             else:
                 logger.warning(
                     "Skipping non-object record in '%s': %r",
@@ -419,6 +475,7 @@ class Motor(ABC):
 
     async def save_to_file(self) -> None:
         self.active.order_by_time()
+        self.on_hold.order_by_time()
         self.finished.order_by_time()
         payload = json_dumps(
             [a.dump() for a in self.get_all()], indent=2, ensure_ascii=False
@@ -426,7 +483,7 @@ class Motor(ABC):
         await write_in_file(self.storage_path, payload)
 
     def get_all(self) -> List[Article]:
-        return self.active + self.finished
+        return list(self.active) + list(self.on_hold) + list(self.finished)
 
     def _article_payload(self, article: Article) -> dict:
         """
@@ -444,6 +501,7 @@ class Motor(ABC):
         logger.info("  Storage path:      %s", self.storage_path)
         logger.info("  Total in storage:  %d", len(self.get_all()))
         logger.info("  Currently active:  %d", len(self.active))
+        logger.info("  Currently on hold: %d", len(self.on_hold))
         logger.info("  Currently finished:%d", len(self.finished))
 
     @property
@@ -470,3 +528,13 @@ class Motor(ABC):
             return default
 
         return max(0.0, min(seconds, float(self.RATE_LIMIT_SLEEP_CAP)))
+
+    def _reconcile_missing(self, results: List[Article]) -> None:
+        missing_from_active = self.active - results
+        missing_from_hold = self.on_hold - results
+
+        for article in missing_from_active:
+            self.save(article, to_status=Status.on_hold, at_beginning=False)
+
+        for article in missing_from_hold:
+            self.save(article, to_status=Status.on_hold, at_beginning=False)

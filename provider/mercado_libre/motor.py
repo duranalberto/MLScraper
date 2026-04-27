@@ -23,7 +23,9 @@ class MercadoLibre(Motor):
         if not root:
             return items, None
 
-        for item in root.select('ol.ui-search-layout > li.ui-search-layout__item'):
+        raw_items = root.select('ol.ui-search-layout > li.ui-search-layout__item')
+
+        for item in raw_items:
             try:
                 link_tag = item.select_one(
                     'a.poly-component__title[href], '
@@ -66,17 +68,17 @@ class MercadoLibre(Motor):
                     logger.exception("Error parsing item in '%s': %s", self.search_term, e)
                 continue
 
-        page_size = self._get_page_size(soup, items)
+        page_size = self._get_page_size(soup, len(raw_items))
         next_url = self._next_url(
             current_url=body.get('url', self.url),
-            items_on_page=len(items),
+            items_on_page=len(raw_items),
             page_size=page_size,
             soup=soup,
         )
 
         return items, next_url
 
-    def _get_page_size(self, soup: BeautifulSoup, items: list) -> int:
+    def _get_page_size(self, soup: BeautifulSoup, raw_item_count: int) -> int:
         try:
             script = soup.find('script', id='__NEXT_DATA__')
             if script:
@@ -84,12 +86,19 @@ class MercadoLibre(Motor):
                 return data["props"]["pageProps"]["initialState"]["melidata_track"]["event_data"]["limit"]
         except Exception:
             pass
-        return len(items) if items else 50
+        return raw_item_count if raw_item_count else 50
 
     def _next_url(self, current_url: str, items_on_page: int, page_size: int, soup: BeautifulSoup):
         if items_on_page <= 0:
             return None
         if not self._has_next_page(soup):
+            return None
+        total_results = self._total_results(soup)
+        if total_results is not None:
+            current_offset = self._current_offset(current_url)
+            if current_offset + items_on_page >= total_results:
+                return None
+        elif items_on_page < page_size:
             return None
         next_offset = self._next_offset(current_url, page_size)
         return self._inject_offset(current_url, next_offset)
@@ -111,6 +120,35 @@ class MercadoLibre(Motor):
         if match:
             return int(match.group(1)) + page_size
         return page_size + 1
+
+    @staticmethod
+    def _current_offset(current_url: str) -> int:
+        match = re.search(r'_Desde_(\d+)', current_url)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                return 0
+        return 0
+
+    def _total_results(self, soup: BeautifulSoup) -> int | None:
+        text = soup.get_text(" ", strip=True).lower()
+        patterns = (
+            r'(\d[\d.,]*)\s+resultados?',
+            r'(\d[\d.,]*)\s+publicaciones?',
+            r'(\d[\d.,]*)\s+art[íi]culos?',
+            r'(\d[\d.,]*)\s+productos?',
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                number = re.sub(r"[^\d]", "", match.group(1))
+                if number:
+                    try:
+                        return int(number)
+                    except ValueError:
+                        continue
+        return None
 
     def _inject_offset(self, current_url: str, next_offset: int) -> str:
         from urllib.parse import urlparse, urlunparse

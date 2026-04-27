@@ -38,6 +38,38 @@ class ArticleHistory:
             price=args.get("price"),
         )
 
+
+@dataclass
+class StatusHistory:
+    datetime: str
+    status: Status
+
+    def __str__(self) -> str:
+        return f"[{self.datetime}] - {self.status}"
+
+    def dump(self) -> Dict[str, Any]:
+        return {
+            "datetime": self.datetime,
+            "status": self.status.value,
+        }
+
+    @staticmethod
+    def create(args: Dict[str, Any]) -> Optional["StatusHistory"]:
+        if "datetime" not in args or not args["datetime"]:
+            return None
+        status_value = args.get("status")
+        if not status_value:
+            return None
+        try:
+            status = status_value if isinstance(status_value, Status) else Status(status_value)
+        except ValueError:
+            return None
+        return StatusHistory(
+            datetime=args["datetime"],
+            status=status,
+        )
+
+
 @dataclass
 class Article:
     identifier:   str
@@ -47,10 +79,14 @@ class Article:
     datetime:     str            = field(default_factory=lambda: str(datetime_lib.now()))
     status:       Status         = Status.none
     history:      List[ArticleHistory] = field(default_factory=list)
+    status_history: List[StatusHistory] = field(default_factory=list)
+    hold_misses:  int            = 0
     last_updated: Optional[str]  = None
 
     def __post_init__(self) -> None:
         self.history = self._load_history(self.history)
+        self.status_history = self._load_status_history(self.status_history)
+        self.hold_misses = self._load_hold_misses(self.hold_misses)
 
     def __str__(self) -> str:
         return f"[{self.datetime}]  {self.title}  ${self.price}"
@@ -81,6 +117,24 @@ class Article:
                 history[-1].datetime = self.datetime
 
         return history
+
+    def _load_status_history(self, raw: list) -> List[StatusHistory]:
+        history: List[StatusHistory] = []
+        for item in (raw or []):
+            ah = StatusHistory.create(item)
+            if ah:
+                history.append(ah)
+        return history
+
+    @staticmethod
+    def _load_hold_misses(value: Any) -> int:
+        if value is None:
+            return 0
+        try:
+            misses = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, misses)
 
     def update(self, to_update: Dict[str, Any]) -> bool:
         """
@@ -117,6 +171,25 @@ class Article:
 
         return True
 
+    def record_status_history(self, status: Status) -> bool:
+        """
+        Record lifecycle transitions that matter to the hold/finish flow.
+        We intentionally never persist `on_hold` here.
+        """
+        if status == Status.on_hold:
+            return False
+
+        ah = StatusHistory.create({
+            "datetime": str(datetime_lib.now()),
+            "status": status.value,
+        })
+        if not ah:
+            return False
+
+        self.status_history.insert(0, ah)
+        self.status_history = self.status_history[:MAX_HISTORY]
+        return True
+
     def dump(self) -> Dict[str, Any]:
         """
         Serialise to a dict suitable for JSON storage.
@@ -134,6 +207,10 @@ class Article:
         if self.history:
             d["last_updated"] = self.last_updated
             d["history"] = [ah.dump() for ah in self.history]
+        if self.status_history:
+            d["status_history"] = [ah.dump() for ah in self.status_history]
+        if self.hold_misses:
+            d["hold_misses"] = self.hold_misses
         return d
 
     @staticmethod
