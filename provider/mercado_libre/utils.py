@@ -12,8 +12,8 @@ _urls = {
 
 class Category(Enum):
     none = ''
-    consolas = '/consolas-videojuegos/consolas/nintendo/usado/'
-    videojuegos = '/consolas-videojuegos/videojuegos/'
+    consolas = '/consolas-videojuegos/usado/'
+    videojuegos = '/consolas-videojuegos/videojuegos/usado/'
     consolas_videojuegos = '/consolas-videojuegos/'
     deportes_jersey = '/deportes-fitness/futbol/'
 

@@ -30,10 +30,15 @@ jobs:
 
   - provider: ml
     search_term: pokemon ds
+    category: consolas
 
   - provider: ml
-    search_term: nintendo ds
+    search_term: nintendo 3ds
     category: consolas
+
+  # - provider: ml
+  #   search_term: nintendo ds
+  #   category: consolas
 
   # - provider: ml
   #   search_term: nintendo switch
@@ -42,9 +47,9 @@ jobs:
   # - provider: ml
   #   search_term: lote nintendo
 
-  - provider: ml
-    search_term: atlas
-    category: deportes_jersey
+  #- provider: ml
+  #  search_term: atlas
+  #  category: deportes_jersey
 
   # - provider: ml
   #   search_term: game cube
@@ -66,6 +71,10 @@ jobs:
   - provider: ph
     search_term: Macbook
     url: "https://www.elpalaciodehierro.com/buscar?q=macbook"
+
+  - provider: ph
+    search_term: Apple
+    url: "https://www.elpalaciodehierro.com/buscar?q=apple"
 
   # ── Amazon ────────────────────────────────────────────────────────────────
   - provider: az

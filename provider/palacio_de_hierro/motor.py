@@ -22,6 +22,7 @@ class PalacioDeHierro(Motor):
         items = self._parse_grid(soup)
 
         if not items:
+            self._scrape_incomplete = True
             logger.warning("[PH] No product tiles found for '%s'.", self.search_term)
             return [], None
 

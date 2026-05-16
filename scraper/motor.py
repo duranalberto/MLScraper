@@ -67,6 +67,7 @@ class Motor(ABC):
         self.finished     = Stream(Status.finished)
         self.debug        = debug
         self.blocked_until: float = 0.0
+        self._scrape_incomplete: bool = False
 
         self._apply_config()
 
@@ -223,6 +224,7 @@ class Motor(ABC):
         results: List[Article] = []
         current_url: Optional[str] = self.url
         loop = asyncio.get_running_loop()
+        self._scrape_incomplete = False
 
         if self.blocked_until > loop.time():
             if self.debug:
@@ -266,7 +268,13 @@ class Motor(ABC):
             return
         
         if results or self.active.get_list() or self.on_hold.get_list():
-            self._reconcile_missing(results)
+            if not self._scrape_incomplete:
+                self._reconcile_missing(results)
+            elif self.debug:
+                logger.warning(
+                    "Skipping missing-item reconciliation for '%s' because the scrape did not complete.",
+                    self.search_term,
+                )
 
             await self.save_to_file()
 
@@ -293,6 +301,7 @@ class Motor(ABC):
     ) -> Optional[str]:
         html = await self._fetch(session, current_url)
         if not html:
+            self._scrape_incomplete = True
             if self.debug:
                 logger.warning(
                     "Failed to fetch '%s' for '%s'",
@@ -305,6 +314,7 @@ class Motor(ABC):
             body = {"content": html, "url": current_url}
             items, next_url = self.scrape_page(body)
         except Exception:
+            self._scrape_incomplete = True
             logger.error("Error parsing %s:\n%s", current_url, format_exc())
             return None
 
@@ -319,6 +329,7 @@ class Motor(ABC):
             )
 
         if not items and next_url:
+            self._scrape_incomplete = True
             cooldown = self.BLOCKED_BACKOFF_SECONDS
             if cooldown > 0:
                 self.blocked_until = asyncio.get_running_loop().time() + cooldown
@@ -366,7 +377,7 @@ class Motor(ABC):
             previously_on_hold = self.on_hold.delete(article)
 
             if previously_finished is not None:
-                previously_finished.record_status_history(Status.finished)
+                previously_finished.record_status_history(Status.active)
                 previously_finished.hold_misses = 0
                 updated = previously_finished.update({"title": article.title, "price": article.price})
                 article = previously_finished
@@ -442,45 +453,92 @@ class Motor(ABC):
 
     def load_from_file(self) -> None:
         seen_identifiers: set[str] = set()
+        loaded = 0
 
-        for data in read_json_file(self.storage_path):
-            if isinstance(data, dict):
-                identifier = data.get("identifier")
-                if identifier in seen_identifiers:
-                    logger.warning(
-                        "Duplicate identifier '%s' found in '%s' — skipping duplicate record.",
-                        identifier,
-                        self.storage_path,
-                    )
-                    continue
-                seen_identifiers.add(identifier)
-                status_value = data.get("status")
-                article = self.create_article(data)
-                if not article:
-                    continue
-                if status_value == Status.finished.value:
-                    article.hold_misses = 0
-                    self.finished.add(article, at_beginning=False)
-                elif status_value == Status.on_hold.value:
-                    article.hold_misses = article.hold_misses or 1
-                    self.on_hold.add(article, at_beginning=False)
-                else:
-                    self.active.add(article, at_beginning=False)
+        for record in read_json_file(self.storage_path):
+            article = self._load_record(record, seen_identifiers)
+            if not article:
+                continue
+
+            loaded += 1
+            if article.status == Status.finished:
+                self.finished.add(article, at_beginning=False)
+            elif article.status == Status.on_hold:
+                self.on_hold.add(article, at_beginning=False)
             else:
-                logger.warning(
-                    "Skipping non-object record in '%s': %r",
-                    self.storage_path,
-                    data,
-                )
+                self.active.add(article, at_beginning=False)
+
+        if self.debug:
+            logger.info(
+                "Loaded %d article(s) from '%s' (active=%d, on_hold=%d, finished=%d).",
+                loaded,
+                self.storage_path,
+                len(self.active),
+                len(self.on_hold),
+                len(self.finished),
+            )
+
+    def _load_record(self, record: Any, seen_identifiers: set[str]) -> Optional[Article]:
+        if not isinstance(record, dict):
+            logger.warning(
+                "Skipping non-object record in '%s': %r",
+                self.storage_path,
+                record,
+            )
+            return None
+
+        identifier = record.get("identifier")
+        if not identifier or not isinstance(identifier, str):
+            logger.warning(
+                "Skipping record without a valid identifier in '%s': %r",
+                self.storage_path,
+                record,
+            )
+            return None
+
+        if identifier in seen_identifiers:
+            logger.warning(
+                "Duplicate identifier '%s' found in '%s' — skipping duplicate record.",
+                identifier,
+                self.storage_path,
+            )
+            return None
+        seen_identifiers.add(identifier)
+
+        article = self.create_article(record)
+        if not article:
+            logger.warning(
+                "Skipping malformed record in '%s': %r",
+                self.storage_path,
+                record,
+            )
+            return None
+
+        status_value = record.get("status")
+        if status_value == Status.finished.value:
+            article.status = Status.finished
+            article.hold_misses = 0
+        elif status_value == Status.on_hold.value:
+            article.status = Status.on_hold
+            article.hold_misses = article.hold_misses or 1
+        else:
+            article.status = Status.active
+
+        return article
 
     async def save_to_file(self) -> None:
         self.active.order_by_time()
         self.on_hold.order_by_time()
         self.finished.order_by_time()
-        payload = json_dumps(
-            [a.dump() for a in self.get_all()], indent=2, ensure_ascii=False
-        )
+        payload = self._dump_state()
         await write_in_file(self.storage_path, payload)
+
+    def _dump_state(self) -> str:
+        return json_dumps(
+            [article.dump() for article in self.get_all()],
+            indent=2,
+            ensure_ascii=False,
+        )
 
     def get_all(self) -> List[Article]:
         return list(self.active) + list(self.on_hold) + list(self.finished)

@@ -175,8 +175,12 @@ class Article:
         """
         Record lifecycle transitions that matter to the hold/finish flow.
         We intentionally never persist `on_hold` here.
+        Consecutive duplicate statuses are ignored to avoid noisy history
+        when a lifecycle transition is replayed.
         """
         if status == Status.on_hold:
+            return False
+        if self.status_history and self.status_history[0].status == status:
             return False
 
         ah = StatusHistory.create({

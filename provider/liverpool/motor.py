@@ -19,6 +19,7 @@ class Liverpool(Motor):
         root = soup.find('script', id='__NEXT_DATA__')
 
         if not root or not root.string:
+            self._scrape_incomplete = True
             logger.error(
                 "[Liverpool] __NEXT_DATA__ script tag missing or empty for '%s'. "
                 "Liverpool may have changed their page structure.",
@@ -30,9 +31,11 @@ class Liverpool(Motor):
             page_object = json.loads(root.string)
             records = page_object['query']['data']['mainContent']['records']
         except json.JSONDecodeError as e:
+            self._scrape_incomplete = True
             logger.error("[Liverpool] Failed to parse __NEXT_DATA__ JSON for '%s': %s", self.search_term, e)
             return [], None
         except (KeyError, TypeError) as e:
+            self._scrape_incomplete = True
             logger.error(
                 "[Liverpool] Unexpected JSON structure for '%s' — key %s not found. "
                 "Liverpool may have changed their data schema.",
