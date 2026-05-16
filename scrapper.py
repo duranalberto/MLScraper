@@ -1,14 +1,13 @@
 """
-Orchestrator — runs all motors on a schedule and routes broadcast events.
+Orchestrator — runs all motors on a schedule and routes notification events.
 """
 
 import asyncio
 import logging
-from json import dumps as json_dumps
 from functools import lru_cache
 from pathlib import Path
 from time import gmtime, strftime, time
-from typing import Optional, Callable, Any
+from typing import Optional, Any
 
 import yaml
 
@@ -54,9 +53,8 @@ _BACKOFF_MAX = int(_SCRAPPER_CONFIG["BACKOFF_MAX"])
 
 
 class Scrapper:
-    def __init__(self, caller: Optional[Callable] = None):
+    def __init__(self):
         self.sleep_time = 400
-        self.caller     = caller
 
         self.motors: list[Motor] = get_motors()
         self._domain_semaphores: dict[str, asyncio.Semaphore] = {}
@@ -74,16 +72,6 @@ class Scrapper:
             )
         else:
             logger.info("Scrapper ready with %d motor(s).", len(self.motors))
-
-
-    def get_list(self) -> list[dict]:
-        return [
-            {
-                "title":    motor.search_term,
-                "elements": [motor._article_payload(a) for a in motor.active],
-            }
-            for motor in self.motors
-        ]
 
     async def run(self) -> None:
         if not self.motors:
@@ -113,7 +101,6 @@ class Scrapper:
                     }
                 )
                 logger.info(status_msg)
-                await self._broadcast_scrape_finished(status_msg)
 
             except Exception as exc:
                 self.health["status"] = "error"
@@ -127,12 +114,25 @@ class Scrapper:
 
 
     async def _scrape_with_limit(self, motor: Motor) -> None:
-        async with self._get_domain_semaphore(motor.domain, motor.CONCURRENCY_LIMIT):
-            await motor.scrape(caller=self._broadcast, silent=True)
+        try:
+            async with self._get_domain_semaphore(motor.domain, motor.CONCURRENCY_LIMIT):
+                await motor.scrape(caller=self._broadcast, silent=True)
+        except Exception:
+            logger.exception(
+                "Motor '%s' failed during scrape; continuing with the remaining motors.",
+                motor.search_term,
+            )
 
     def _get_domain_semaphore(self, domain: str, limit: int | None) -> asyncio.Semaphore:
         if limit is None:
             limit = MAX_CONCURRENT_MOTORS
+        elif limit < 1:
+            logger.warning(
+                "Domain '%s' requested invalid concurrency %d; clamping to 1.",
+                domain,
+                limit,
+            )
+            limit = 1
 
         semaphore = self._domain_semaphores.get(domain)
         if semaphore is None:
@@ -156,13 +156,7 @@ class Scrapper:
             logger.warning("Unknown broadcast_type '%s' — ignored.", broadcast_type)
 
     async def _broadcast_new_element(self, element: dict) -> None:
-        response = {"message": "new element", "payload": element}
         await send_new_to_telegram(element)
-        if self.caller:
-            try:
-                await self.caller(json_dumps(response))
-            except Exception as exc:
-                logger.error("WebSocket broadcast failed (new_element): %s", exc)
 
     async def _broadcast_is_updated(self, element: dict) -> None:
         history = element.get("history", [])
@@ -185,18 +179,6 @@ class Scrapper:
             element["percent_change"] = f"{abs(percent_change):.2f}"
             logger.info("PRICE DROP: %s (%s%%) — %s", element.get("title"), element["percent_change"], element.get("url"))
             await send_price_drop_to_telegram(element)
-            if self.caller:
-                try:
-                    await self.caller(json_dumps({"message": "price drop", "payload": element}))
-                except Exception as exc:
-                    logger.error("WebSocket broadcast failed (price_drop): %s", exc)
-
-    async def _broadcast_scrape_finished(self, status_text: str) -> None:
-        if self.caller:
-            try:
-                await self.caller(json_dumps({"message": "scrape status", "payload": status_text}))
-            except Exception as exc:
-                logger.error("WebSocket broadcast failed (scrape_status): %s", exc)
 
     @staticmethod
     def _parse_price(value: Any) -> Optional[float]:

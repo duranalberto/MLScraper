@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 
@@ -19,11 +20,17 @@ def _slug(text: str) -> str:
          "LV Laptops"   →  "lv-laptops"
          "pokémon tcg"  →  "pokemon-tcg"
     """
-    text = unicodedata.normalize("NFKD", text)
+    source = text or ""
+    text = unicodedata.normalize("NFKD", source)
     text = text.encode("ascii", "ignore").decode("ascii")
     text = text.lower().strip()
     text = re.sub(r"[^a-z0-9]+", "-", text)
-    return re.sub(r"-+", "-", text).strip("-")
+    slug = re.sub(r"-+", "-", text).strip("-")
+    if slug:
+        return slug
+
+    digest = hashlib.sha1(source.encode("utf-8")).hexdigest()[:8]
+    return f"item-{digest}"
 
 
 def _storage_path(provider: str, search_term: str, qualifier: str = "") -> str:

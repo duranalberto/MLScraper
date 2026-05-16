@@ -19,8 +19,19 @@ class MercadoLibre(Motor):
         html = body.get('content', '')
         soup = BeautifulSoup(html, 'html.parser')
 
+        if self._is_account_verification_page(soup):
+            self._scrape_incomplete = True
+            if self.debug:
+                logger.warning(
+                    "Mercado Libre is requesting account verification for '%s' at %s.",
+                    self.search_term,
+                    body.get('url', self.url),
+                )
+            return items, None
+
         root = soup.find('section', class_='ui-search-results')
         if not root:
+            self._scrape_incomplete = True
             return items, None
 
         raw_items = root.select('ol.ui-search-layout > li.ui-search-layout__item')
@@ -163,3 +174,12 @@ class MercadoLibre(Motor):
         else:
             path = f'{path}_Desde_{next_offset}'
         return urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, parsed.query, parsed.fragment))
+
+    @staticmethod
+    def _is_account_verification_page(soup: BeautifulSoup) -> bool:
+        html = str(soup).lower()
+        if 'account-verification' in html or 'suspicious-traffic' in html:
+            return True
+
+        text = soup.get_text(' ', strip=True).lower()
+        return 'ingresa a tu cuenta' in text and 'mercado libre' in text
