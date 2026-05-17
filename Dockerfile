@@ -7,6 +7,7 @@ WORKDIR ${INSTALL_PATH}
 
 COPY    requirements.txt ${REQUIEREMENTS}
 RUN     pip install -r ${REQUIEREMENTS}
+RUN     python -m playwright install --with-deps chromium
 
 COPY    . .
 

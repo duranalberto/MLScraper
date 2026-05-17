@@ -1,6 +1,8 @@
 import logging
 import re
 import json
+from urllib.parse import urlparse
+
 from bs4 import BeautifulSoup
 from scraper.motor import Motor
 from .utils import Category, get_identifier, construct_search_url
@@ -9,8 +11,17 @@ logger = logging.getLogger(__name__)
 
 
 class MercadoLibre(Motor):
-    def __init__(self, search_term: str, category: Category = Category.consolas_videojuegos, *, storage_path: str):
-        super().__init__(search_term, construct_search_url(search_term, category), storage_path=storage_path)
+    PROVIDER_KEY = "ml"
+
+    def __init__(
+        self,
+        search_term: str,
+        category: Category = Category.consolas_videojuegos,
+        *,
+        url: str | None = None,
+        storage_path: str,
+    ):
+        super().__init__(search_term, url or construct_search_url(search_term, category), storage_path=storage_path)
 
     def scrape_page(self, body):
         items = []
@@ -19,19 +30,35 @@ class MercadoLibre(Motor):
         html = body.get('content', '')
         soup = BeautifulSoup(html, 'html.parser')
 
-        if self._is_account_verification_page(soup):
+        blocked_reason = self._blocked_page_reason(soup)
+        if blocked_reason:
             self._scrape_incomplete = True
+            self.mark_blocked(blocked_reason, self.BLOCKED_BACKOFF_SECONDS)
             if self.debug:
                 logger.warning(
-                    "Mercado Libre is requesting account verification for '%s' at %s.",
+                    "Mercado Libre returned a blocked/gated page (%s) for '%s' at %s.",
+                    blocked_reason,
                     self.search_term,
                     body.get('url', self.url),
                 )
             return items, None
 
+        items, next_url = self._parse_dom_results(soup, body.get('url', self.url))
+        if not items:
+            items, next_url = self._parse_nordic_state(soup)
+
+        if not items:
+            self._scrape_incomplete = True
+            self.blocked_reason = "mercado_libre_results_root_missing"
+            return items, None
+
+        return items, next_url
+
+    def _parse_dom_results(self, soup: BeautifulSoup, current_url: str):
+        items = []
+        next_url = None
         root = soup.find('section', class_='ui-search-results')
         if not root:
-            self._scrape_incomplete = True
             return items, None
 
         raw_items = root.select('ol.ui-search-layout > li.ui-search-layout__item')
@@ -62,7 +89,14 @@ class MercadoLibre(Motor):
                 )
                 
                 raw_price = price_span.get_text(strip=True) if price_span else '0'
+                cents_span = item.select_one(
+                    '.poly-price__current .andes-money-amount__cents, '
+                    '.ui-search-price__second-line .andes-money-amount__cents'
+                )
+                raw_cents = cents_span.get_text(strip=True) if cents_span else ''
                 price_str = raw_price.replace(',', '').strip()
+                if raw_cents:
+                    price_str = f"{price_str}.{raw_cents.zfill(2)}"
                 try:
                     price_val = float(price_str) if price_str else 0.0
                 except ValueError:
@@ -81,13 +115,85 @@ class MercadoLibre(Motor):
 
         page_size = self._get_page_size(soup, len(raw_items))
         next_url = self._next_url(
-            current_url=body.get('url', self.url),
+            current_url=current_url,
             items_on_page=len(raw_items),
             page_size=page_size,
             soup=soup,
         )
 
         return items, next_url
+
+    def _parse_nordic_state(self, soup: BeautifulSoup):
+        state = self._nordic_initial_state(soup)
+        if not state:
+            return [], None
+
+        items = []
+        for result in state.get('results') or []:
+            polycard = result.get('polycard') if isinstance(result, dict) else None
+            if not isinstance(polycard, dict):
+                continue
+            metadata = polycard.get('metadata') or {}
+            title = self._nordic_component_value(polycard, 'title', 'title', 'text')
+            price = self._nordic_component_value(polycard, 'price', 'price', 'current_price', 'value')
+            raw_url = self._nordic_url(metadata)
+            identifier = metadata.get('user_product_id') or metadata.get('id') or get_identifier(raw_url)
+
+            if not identifier or not title or price is None:
+                continue
+
+            try:
+                price_val = float(price)
+            except (TypeError, ValueError):
+                price_val = 0.0
+
+            items.append({
+                'identifier': str(identifier),
+                'title': str(title),
+                'price': price_val,
+                'url': raw_url.split('#', 1)[0],
+            })
+
+        pagination = state.get('pagination') or {}
+        next_page = pagination.get('next_page') or {}
+        next_url = next_page.get('url') if next_page.get('show') else None
+        return items, next_url
+
+    @staticmethod
+    def _nordic_initial_state(soup: BeautifulSoup) -> dict | None:
+        script = soup.find('script', id='__NORDIC_RENDERING_CTX__')
+        body = (script.string or script.get_text()) if script else ''
+        prefix = '_n.ctx.r='
+        if not body.startswith(prefix):
+            return None
+        try:
+            data, _ = json.JSONDecoder().raw_decode(body[len(prefix):])
+            return data['appProps']['pageProps']['initialState']
+        except (KeyError, TypeError, json.JSONDecodeError):
+            return None
+
+    @staticmethod
+    def _nordic_component_value(polycard: dict, component_type: str, *path: str):
+        for component in polycard.get('components') or []:
+            if component.get('type') != component_type:
+                continue
+            value = component
+            for key in path:
+                if not isinstance(value, dict) or key not in value:
+                    return None
+                value = value[key]
+            return value
+        return None
+
+    @staticmethod
+    def _nordic_url(metadata: dict) -> str:
+        raw_url = str(metadata.get('url') or '')
+        if raw_url and not urlparse(raw_url).scheme:
+            raw_url = f'https://{raw_url}'
+        fragments = str(metadata.get('url_fragments') or '')
+        if fragments and raw_url and '#' not in raw_url:
+            raw_url = f'{raw_url}{fragments}'
+        return raw_url
 
     def _get_page_size(self, soup: BeautifulSoup, raw_item_count: int) -> int:
         try:
@@ -177,9 +283,17 @@ class MercadoLibre(Motor):
 
     @staticmethod
     def _is_account_verification_page(soup: BeautifulSoup) -> bool:
+        return MercadoLibre._blocked_page_reason(soup) is not None
+
+    @staticmethod
+    def _blocked_page_reason(soup: BeautifulSoup) -> str | None:
         html = str(soup).lower()
         if 'account-verification' in html or 'suspicious-traffic' in html:
-            return True
+            return 'mercado_libre_account_verification'
 
         text = soup.get_text(' ', strip=True).lower()
-        return 'ingresa a tu cuenta' in text and 'mercado libre' in text
+        if 'this page requires javascript' in text or 'enable javascript' in text:
+            return 'mercado_libre_js_required'
+        if 'ingresa a tu cuenta' in text and 'mercado libre' in text:
+            return 'mercado_libre_account_verification'
+        return None

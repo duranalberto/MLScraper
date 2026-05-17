@@ -4,6 +4,7 @@ Orchestrator — runs all motors on a schedule and routes notification events.
 
 import asyncio
 import logging
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 from time import gmtime, strftime, time
@@ -36,7 +37,7 @@ def _load_scrapper_config() -> dict[str, Any]:
             f"'{_CONFIG_PATH}' must contain a YAML mapping at the top level."
         )
 
-    required = ("MAX_CONCURRENT_MOTORS", "BACKOFF_INITIAL", "BACKOFF_MAX")
+    required = ("BACKOFF_INITIAL", "BACKOFF_MAX")
     missing = [key for key in required if key not in data]
     if missing:
         raise KeyError(
@@ -47,7 +48,12 @@ def _load_scrapper_config() -> dict[str, Any]:
 
 
 _SCRAPPER_CONFIG = _load_scrapper_config()
-MAX_CONCURRENT_MOTORS = int(_SCRAPPER_CONFIG["MAX_CONCURRENT_MOTORS"])
+DEFAULT_PROVIDER_CONCURRENCY = int(
+    _SCRAPPER_CONFIG.get(
+        "DEFAULT_PROVIDER_CONCURRENCY",
+        _SCRAPPER_CONFIG.get("MAX_CONCURRENT_MOTORS", 1),
+    )
+)
 _BACKOFF_INITIAL = int(_SCRAPPER_CONFIG["BACKOFF_INITIAL"])
 _BACKOFF_MAX = int(_SCRAPPER_CONFIG["BACKOFF_MAX"])
 
@@ -57,14 +63,25 @@ class Scrapper:
         self.sleep_time = 400
 
         self.motors: list[Motor] = get_motors()
-        self._domain_semaphores: dict[str, asyncio.Semaphore] = {}
-        self._domain_limits: dict[str, int] = {}
+        self._provider_semaphores: dict[str, asyncio.Semaphore] = {}
+        self._provider_limits: dict[str, int] = {}
+        self._provider_active: Counter[str] = Counter()
+        self._provider_waiting: Counter[str] = Counter()
+        self._provider_job_counts: Counter[str] = Counter(motor.provider_key for motor in self.motors)
+        self._motors_by_provider: dict[str, list[Motor]] = {}
+        self._provider_cycle_health: dict[str, dict[str, Any]] = {}
+        for motor in self.motors:
+            self._motors_by_provider.setdefault(motor.provider_key, []).append(motor)
+            self._configured_provider_limit(motor.provider_key, motor.CONCURRENCY_LIMIT)
+            self._ensure_provider_cycle_health(motor.provider_key)
         self.health: dict[str, Any] = {
             "status": "starting",
             "last_cycle_finished_at": None,
             "last_cycle_duration_s": None,
             "motor_count": len(self.motors),
+            "providers": {},
         }
+        self._refresh_provider_health()
         if not self.motors:
             logger.critical(
                 "No motors were loaded. Check config/jobs.yaml and provider factories. "
@@ -72,6 +89,13 @@ class Scrapper:
             )
         else:
             logger.info("Scrapper ready with %d motor(s).", len(self.motors))
+            for provider, stats in self.health["providers"].items():
+                logger.info(
+                    "Provider '%s' ready with %d job(s), concurrency=%d.",
+                    provider,
+                    stats["job_count"],
+                    stats["configured_limit"],
+                )
 
     async def run(self) -> None:
         if not self.motors:
@@ -82,70 +106,192 @@ class Scrapper:
 
         logger.info("Scraper service started.")
         self.health["status"] = "running"
+        provider_tasks = [
+            asyncio.create_task(
+                self._run_provider_loop(provider, motors),
+                name=f"scraper-provider-{provider}",
+            )
+            for provider, motors in self._motors_by_provider.items()
+        ]
+        await asyncio.gather(*provider_tasks)
+
+    async def _run_provider_loop(self, provider: str, motors: list[Motor]) -> None:
         backoff = _BACKOFF_INITIAL
 
         while True:
             start_time = time()
+            started_at = self._utc_timestamp()
+            provider_health = self._ensure_provider_cycle_health(provider)
+            provider_health.update(
+                {
+                    "status": "running",
+                    "last_cycle_started_at": started_at,
+                    "last_error": None,
+                }
+            )
+            self._refresh_provider_health()
+
             try:
                 await asyncio.gather(
-                    *[self._scrape_with_limit(motor) for motor in self.motors]
+                    *(self._scrape_with_limit(motor) for motor in motors)
                 )
-                duration   = time() - start_time
-                backoff    = _BACKOFF_INITIAL
-                status_msg = f"Scraping cycle finished in {duration:.2f}s."
-                self.health.update(
+            except Exception as exc:
+                provider_health = self._ensure_provider_cycle_health(provider)
+                provider_health.update(
                     {
-                        "status": "ok",
-                        "last_cycle_finished_at": strftime("%Y-%m-%dT%H:%M:%SZ", gmtime()),
-                        "last_cycle_duration_s": round(duration, 2),
+                        "status": "error",
+                        "last_error": str(exc),
                     }
                 )
-                logger.info(status_msg)
-
-            except Exception as exc:
-                self.health["status"] = "error"
-                logger.error("Error during scraping cycle: %s", exc)
-                logger.info("Backing off for %ds before retrying.", backoff)
+                self._refresh_provider_health()
+                logger.error("Error during provider '%s' scraping cycle: %s", provider, exc)
+                logger.info(
+                    "Provider '%s' backing off for %.2fs before retrying.",
+                    provider,
+                    backoff,
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, _BACKOFF_MAX)
                 continue
+
+            duration = time() - start_time
+            finished_at = self._utc_timestamp()
+            backoff = _BACKOFF_INITIAL
+            provider_health = self._ensure_provider_cycle_health(provider)
+            provider_health.update(
+                {
+                    "status": "ok",
+                    "last_cycle_finished_at": finished_at,
+                    "last_cycle_duration_s": round(duration, 2),
+                    "cycle_count": provider_health["cycle_count"] + 1,
+                    "last_error": None,
+                }
+            )
+            self.health.update(
+                {
+                    "status": "ok",
+                    "last_cycle_finished_at": finished_at,
+                    "last_cycle_duration_s": round(duration, 2),
+                }
+            )
+            self._refresh_provider_health()
+            logger.info("Provider '%s' scraping cycle finished in %.2fs.", provider, duration)
 
             await asyncio.sleep(self.sleep_time)
 
 
     async def _scrape_with_limit(self, motor: Motor) -> None:
+        provider = motor.provider_key
+        semaphore = self._get_provider_semaphore(provider, motor.CONCURRENCY_LIMIT)
+        acquired = False
+        self._provider_waiting[provider] += 1
+        self._refresh_provider_health()
         try:
-            async with self._get_domain_semaphore(motor.domain, motor.CONCURRENCY_LIMIT):
-                await motor.scrape(caller=self._broadcast, silent=True)
+            async with semaphore:
+                acquired = True
+                self._provider_waiting[provider] -= 1
+                self._provider_active[provider] += 1
+                self._refresh_provider_health()
+                try:
+                    await motor.scrape(caller=self._broadcast, silent=True)
+                finally:
+                    self._provider_active[provider] -= 1
+                    self._refresh_provider_health()
         except Exception:
             logger.exception(
-                "Motor '%s' failed during scrape; continuing with the remaining motors.",
+                "Motor '%s' (%s) failed during scrape; continuing with the remaining motors.",
                 motor.search_term,
+                provider,
             )
+        finally:
+            if not acquired:
+                self._provider_waiting[provider] -= 1
+            self._refresh_provider_health()
 
-    def _get_domain_semaphore(self, domain: str, limit: int | None) -> asyncio.Semaphore:
-        if limit is None:
-            limit = MAX_CONCURRENT_MOTORS
-        elif limit < 1:
+    def _get_provider_semaphore(self, provider: str, limit: int | None) -> asyncio.Semaphore:
+        limit = self._configured_provider_limit(provider, limit)
+
+        semaphore = self._provider_semaphores.get(provider)
+        if semaphore is None:
+            self._provider_semaphores[provider] = asyncio.Semaphore(limit)
+            self._provider_limits[provider] = limit
+            self._refresh_provider_health()
+        elif self._provider_limits.get(provider) != limit:
             logger.warning(
-                "Domain '%s' requested invalid concurrency %d; clamping to 1.",
-                domain,
+                "Provider '%s' requested concurrency %d but already has %d; keeping the first configured value.",
+                provider,
                 limit,
+                self._provider_limits.get(provider, limit),
             )
+        return self._provider_semaphores[provider]
+
+    def _configured_provider_limit(self, provider: str, limit: int | None) -> int:
+        existing = self._provider_limits.get(provider)
+        if limit is None:
+            limit = DEFAULT_PROVIDER_CONCURRENCY
+        elif limit < 1:
+            if existing is None:
+                logger.warning(
+                    "Provider '%s' requested invalid concurrency %d; clamping to 1.",
+                    provider,
+                    limit,
+                )
             limit = 1
 
-        semaphore = self._domain_semaphores.get(domain)
-        if semaphore is None:
-            self._domain_semaphores[domain] = asyncio.Semaphore(limit)
-            self._domain_limits[domain] = limit
-        elif self._domain_limits.get(domain) != limit:
+        if existing is None:
+            self._provider_limits[provider] = limit
+        elif existing != limit:
             logger.warning(
-                "Domain '%s' requested concurrency %d but already has %d; keeping the first configured value.",
-                domain,
+                "Provider '%s' requested concurrency %d but already has %d; keeping the first configured value.",
+                provider,
                 limit,
-                self._domain_limits.get(domain, limit),
+                existing,
             )
-        return self._domain_semaphores[domain]
+            limit = existing
+        return limit
+
+    def _ensure_provider_cycle_health(self, provider: str) -> dict[str, Any]:
+        return self._provider_cycle_health.setdefault(
+            provider,
+            {
+                "status": "idle",
+                "last_cycle_started_at": None,
+                "last_cycle_finished_at": None,
+                "last_cycle_duration_s": None,
+                "cycle_count": 0,
+                "last_error": None,
+            },
+        )
+
+    def _refresh_provider_health(self) -> None:
+        providers = set(self._provider_job_counts)
+        providers.update(self._provider_limits)
+        providers.update(self._provider_active)
+        providers.update(self._provider_waiting)
+        providers.update(self._provider_cycle_health)
+        self.health["providers"] = {
+            provider: {
+                **self._ensure_provider_cycle_health(provider),
+                "configured_limit": self._provider_limits.get(provider, DEFAULT_PROVIDER_CONCURRENCY),
+                "job_count": self._provider_job_counts.get(provider, 0),
+                "active_jobs": max(0, self._provider_active.get(provider, 0)),
+                "queued_jobs": max(0, self._provider_waiting.get(provider, 0)),
+                "blocked_jobs": sum(
+                    1
+                    for motor in self.motors
+                    if motor.provider_key == provider and motor.blocked_reason
+                ),
+                "block_reasons": sorted(
+                    {
+                        motor.blocked_reason
+                        for motor in self.motors
+                        if motor.provider_key == provider and motor.blocked_reason
+                    }
+                    - {None}
+                ),
+            }
+            for provider in sorted(providers)
+        }
 
     async def _broadcast(self, broadcast_type: str, element: dict) -> None:
         if broadcast_type == "new_element":
@@ -195,6 +341,10 @@ class Scrapper:
             except ValueError:
                 return None
         return None
+
+    @staticmethod
+    def _utc_timestamp() -> str:
+        return strftime("%Y-%m-%dT%H:%M:%SZ", gmtime())
 
 
 if __name__ == "__main__":

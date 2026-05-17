@@ -6,6 +6,7 @@ from .utils import Seller
 
 
 class Amazon(Motor):
+    PROVIDER_KEY = "az"
     DOMAIN = 'https://www.amazon.com.mx'
 
     def __init__(self, search_term: str, seller: Seller = Seller.none, *, storage_path: str):

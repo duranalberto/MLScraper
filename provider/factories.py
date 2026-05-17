@@ -51,6 +51,7 @@ def _storage_path(provider: str, search_term: str, qualifier: str = "") -> str:
 def _ml_factory(
     search_term: str,
     category: Category = Category.consolas_videojuegos,
+    url: str | None = None,
     **_,
 ) -> MercadoLibre:
     """
@@ -67,7 +68,7 @@ def _ml_factory(
         else category.name          # e.g. "consolas", "videojuegos", "deportes_jersey"
     )
     path = _storage_path("mercado_libre", search_term, qualifier)
-    return MercadoLibre(search_term, category, storage_path=path)
+    return MercadoLibre(search_term, category, url=url, storage_path=path)
 
 
 @_REGISTRY.factory("az")

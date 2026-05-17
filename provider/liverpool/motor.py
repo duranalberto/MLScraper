@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 class Liverpool(Motor):
+    PROVIDER_KEY = "lv"
+
     def __init__(self, search_term: str, url: str, *, storage_path: str):
         super().__init__(search_term, url, storage_path=storage_path)
 
