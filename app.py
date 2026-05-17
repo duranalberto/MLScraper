@@ -4,7 +4,8 @@ from uvicorn import run as uvicorn_run
 from asyncio import create_task as asyncio_create_task
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
-from scrapper import Scrapper
+
+from scraper.runtime.orchestrator import Scrapper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

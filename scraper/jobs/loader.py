@@ -1,5 +1,5 @@
 """
-provider/loader.py
+scraper/jobs/loader.py
 
 YAML Job Catalogue Loader
 ─────────────────────────
@@ -42,14 +42,15 @@ from typing import Any
 
 import yaml
 
-from provider.amazon.utils import Seller
-from provider.mercado_libre.utils import Category
+from provider.amazon.options import Seller
+from provider.mercado_libre.options import Category
 
 logger = logging.getLogger(__name__)
 
 _URL_REQUIRED_PROVIDERS = {"lv", "ph"}
 
-DEFAULT_CONFIG_PATH = Path("config/jobs.yaml")
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "jobs.yaml"
 
 
 def _coerce_category(raw: str, entry: dict) -> Category | None:

@@ -4,7 +4,7 @@ import urllib.parse
 from typing import Optional, Tuple, List
 
 from bs4 import BeautifulSoup
-from scraper.motor import Motor
+from shared.scraping.motor import Motor
 
 logger = logging.getLogger(__name__)
 

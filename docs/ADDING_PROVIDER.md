@@ -1,20 +1,25 @@
 # Adding a Provider
 
 Follow the existing registry and motor pattern. Keep provider-specific parsing
-inside the new provider package.
+inside the new provider package, and split parser helpers there when a provider
+needs multiple parsing modes or pagination helpers.
 
 ## Steps
 
 1. Create a provider package under `provider/<provider_name>/`.
-2. Add a motor class that subclasses `scraper.motor.Motor`.
+2. Add a motor class that subclasses `shared.scraping.motor.Motor`.
 3. Set `PROVIDER_KEY` on the motor.
 4. Implement `scrape_page(self, body)` and return `(items, next_url)`.
-5. Register a factory in `provider/factories.py` with a short provider key.
-6. Add any enum coercion needed by YAML jobs in `provider/loader.py`.
+5. Register a factory in `scraper/jobs/factories.py` with a short provider key.
+6. Add any enum coercion needed by YAML jobs in `scraper/jobs/loader.py`.
 7. Add default or provider-specific policy in `config/motors.yaml`.
 8. Add a safe example job to `config/jobs.yaml.example`.
 9. Add parser and configuration tests in `tests/`.
 10. Update `README.md` and `docs/CONFIGURATION.md` if the public setup changes.
+
+Provider packages should use purpose-specific helper modules such as
+`parser.py`, `urls.py`, `options.py`, or `selectors.py`. Do not add shared
+scraper logic or generic provider root modules under `provider/`.
 
 ## Motor Contract
 

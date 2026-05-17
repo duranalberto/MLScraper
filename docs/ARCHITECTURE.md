@@ -18,22 +18,35 @@ details. It returns `503` while the scraper is still starting.
 ## Core Modules
 
 - `app.py`: FastAPI entrypoint and health endpoint.
-- `scrapper.py`: scheduler, provider concurrency control, health aggregation,
-  and notification routing.
-- `scraper/motor.py`: shared motor lifecycle, fetching, pagination,
-  persistence, and missing-item reconciliation.
-- `scraper/fetchers.py`: `aiohttp` and Playwright browser fetch strategies.
-- `scraper/article.py`: persisted product and history data classes.
-- `provider/registry.py`: provider factory registry.
-- `provider/factories.py`: job-to-motor construction and storage path naming.
-- `provider/loader.py`: YAML job loading, validation, and enum coercion.
+- `scraper/runtime/orchestrator.py`: public scraper orchestrator; delegates
+  provider concurrency, health aggregation, and notification routing to focused
+  helpers.
+- `scraper/runtime/config.py`: scheduler-level config loader for
+  `config/scrapper.yaml`.
+- `shared/scraping/motor.py`: public shared motor base; delegates config,
+  persistence, lifecycle transitions, and missing-item reconciliation to focused
+  helpers.
+- `shared/scraping/fetchers.py`: `aiohttp` and Playwright browser fetch
+  strategies.
+- `shared/articles/article.py`: persisted product and history data classes.
+- `scraper/jobs/registry.py`: provider factory registry.
+- `scraper/jobs/factories.py`: job-to-motor construction and storage path naming.
+- `scraper/jobs/loader.py`: YAML job loading, validation, and enum coercion.
+- `scraper/runtime/`: provider concurrency, health, and notification helpers.
 - `utils/file_manager.py`: safe JSON reads and atomic writes below `DATA_PATH`.
+- `utils/headers.py`: request header rendering over shared browser profiles.
 - `utils/telegram.py`: optional Telegram notification integration.
 
 ## Provider Boundaries
 
-Each provider owns its URL construction, parsing, enums, and provider-specific
-fallbacks. Shared scheduling and lifecycle behavior stays in `scraper/`.
+Each provider owns its URL construction, parsing, enums/options, selectors, and
+provider-specific fallbacks. Larger providers can split parser helpers inside
+their provider package.
+
+Shared contracts used by both provider implementations and scraper
+orchestration live in `shared/`. `shared/` must not import from `provider/` or
+`scraper/`. Scraper-owned job assembly and runtime orchestration live in
+`scraper/`.
 
 Current provider keys:
 

@@ -5,7 +5,7 @@ MLScraper persists one JSON list per configured motor. Files live below
 
 ## Article Record
 
-Each persisted record is created by `scraper.article.Article.dump()`.
+Each persisted record is created by `shared.articles.article.Article.dump()`.
 
 Required fields:
 
@@ -38,13 +38,12 @@ Example:
 
 ## Status Values
 
-Statuses are defined in `scraper/status.py`:
+Statuses are defined in `shared/articles/status.py`:
 
 - `none`
 - `active`
 - `on_hold`
 - `finished`
-- `ignoring`
 
 Current reconciliation flow moves missing active records to `on_hold` first.
 After repeated misses, records move to `finished`.
@@ -53,7 +52,7 @@ After repeated misses, records move to `finished`.
 
 `history` stores previous title or price values when an active item changes.
 `status_history` stores lifecycle transitions that matter to the hold/finish
-flow. Histories are capped by `MAX_HISTORY` in `scraper/article.py`.
+flow. Histories are capped by `MAX_HISTORY` in `shared/articles/article.py`.
 
 ## Reads and Writes
 

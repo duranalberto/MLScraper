@@ -2,11 +2,11 @@ FROM    python:3.14.5-slim
 LABEL   maintainer="Alberto Duran"
 
 ENV     INSTALL_PATH /MLScraper
-ENV     REQUIEREMENTS requirements.txt
+ENV     REQUIREMENTS_FILE requirements.txt
 WORKDIR ${INSTALL_PATH}
 
-COPY    requirements.txt ${REQUIEREMENTS}
-RUN     pip install -r ${REQUIEREMENTS}
+COPY    requirements.txt ${REQUIREMENTS_FILE}
+RUN     pip install -r ${REQUIREMENTS_FILE}
 RUN     python -m playwright install --with-deps chromium
 
 COPY    . .

@@ -3,16 +3,27 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import provider.factories
+from shared.scraping.motor import Motor
 
-from provider.loader import load_jobs, DEFAULT_CONFIG_PATH
-from provider.registry import _REGISTRY, register_entries, build_motors
-from scraper.motor import Motor
+from .factories import register_default_factories
+from .loader import DEFAULT_CONFIG_PATH, load_jobs
+from .registry import _REGISTRY, build_motors, register_entries
 
 logger = logging.getLogger(__name__)
+_FACTORIES_REGISTERED = False
+
+
+def _ensure_default_factories_registered() -> None:
+    global _FACTORIES_REGISTERED
+    if _FACTORIES_REGISTERED:
+        return
+    register_default_factories(_REGISTRY)
+    _FACTORIES_REGISTERED = True
 
 
 def get_motors(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[Motor]:
+    _ensure_default_factories_registered()
+
     try:
         entries = load_jobs(config_path)
     except FileNotFoundError as exc:

@@ -20,13 +20,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
-
   # ── MercadoLibre ──────────────────────────────────────────────────────────
   # - provider: ml
   #   search_term: fire emblem
 
-  # - provider: ml
-  #   search_term: zelda wii
+  #- provider: ml
+  #  search_term: zelda wii
 
   - provider: ml
     search_term: pokemon ds
@@ -44,8 +43,8 @@ jobs:
   #   search_term: nintendo switch
   #   category: consolas
 
-  # - provider: ml
-  #   search_term: lote nintendo
+  #- provider: ml
+  #  search_term: lote nintendo
 
   #- provider: ml
   #  search_term: atlas

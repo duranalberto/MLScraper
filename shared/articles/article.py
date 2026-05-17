@@ -102,19 +102,12 @@ class Article:
             return self.identifier == other.identifier
         return NotImplemented
 
-    def _load_history(self, raw: list, fix: bool = False) -> List[ArticleHistory]:
+    def _load_history(self, raw: list) -> List[ArticleHistory]:
         history: List[ArticleHistory] = []
         for item in raw or []:
             ah = ArticleHistory.create(item)
             if ah:
                 history.append(ah)
-
-        if fix:
-            if len(history) == 1:
-                history[0].datetime = self.datetime
-            elif len(history) > 1:
-                history.sort(key=lambda x: x.datetime, reverse=True)
-                history[-1].datetime = self.datetime
 
         return history
 

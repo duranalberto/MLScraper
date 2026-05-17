@@ -41,9 +41,12 @@ pre-commit run --all-files
 ## Style
 
 - Prefer clear, direct Python over new abstractions.
-- Keep provider-specific parsing inside provider packages.
-- Put shared scraper lifecycle behavior in `scraper/`.
-- Use the existing registry and factory pattern for providers.
+- Keep provider-specific parsing, URL building, options/enums, and selectors
+  inside provider packages.
+- Put shared provider/scraper contracts in `shared/`.
+- Put scraper job assembly and runtime orchestration in `scraper/`.
+- Use the registry and factory pattern in `scraper/jobs/` for providers.
+- Avoid new generic provider `utils.py` modules; use purpose-specific names.
 - Update docs when commands, config, providers, or runtime behavior change.
 
 ## Pull Request Checklist

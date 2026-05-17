@@ -59,7 +59,7 @@ Runtime configuration lives in `config/`:
 
 - `config/jobs.yaml` defines the scraping jobs to run.
 - `config/motors.yaml` defines provider fetch, delay, backoff, and concurrency policy.
-- `config/scrapper.yaml` defines scheduler-level defaults and backoff values.
+- `config/scrapper.yaml` defines scheduler-level backoff values.
 - `config/telegram.yaml.example` is the template for optional Telegram credentials.
 
 Copy the Telegram example only if you want notifications:
@@ -79,10 +79,13 @@ See [Configuration](docs/CONFIGURATION.md) for the full config guide.
 ## Project Map
 
 - `app.py` creates the FastAPI app and starts the background scraper task.
-- `scrapper.py` schedules provider loops and routes notification events.
-- `scraper/` contains shared article, stream, fetcher, and motor behavior.
-- `provider/` contains provider-specific factories, parsers, and motors.
-- `utils/` contains persistence, Telegram, headers, and supporting helpers.
+- `scraper/runtime/orchestrator.py` starts provider loops while scraper helpers
+  handle concurrency, health, and notification routing.
+- `shared/` contains shared article, stream, fetcher, motor, lifecycle, and
+  persistence contracts used by both providers and scraper orchestration.
+- `scraper/` contains job assembly and runtime orchestration helpers.
+- `provider/` contains provider-specific motors, parsers, URLs, and options.
+- `utils/` contains persistence, Telegram, header profiles, and supporting helpers.
 - `tests/` contains the current regression suite.
 
 More detail:
@@ -102,5 +105,5 @@ This repository includes root guidance files for coding agents:
 - `CLAUDE.md` for Claude
 
 Both files tell agents how to work safely in this project: avoid changing
-runtime data, keep provider-specific logic isolated, prefer existing registry
-and factory patterns, and run the relevant checks after behavior changes.
+runtime data, keep provider-specific logic isolated, keep shared contracts in
+`shared/`, and run the relevant checks after behavior changes.

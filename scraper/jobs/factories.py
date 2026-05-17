@@ -4,13 +4,14 @@ import hashlib
 import re
 import unicodedata
 
-from provider.registry import _REGISTRY
 from provider.amazon.motor import Amazon
-from provider.amazon.utils import Seller
+from provider.amazon.options import Seller
 from provider.liverpool.motor import Liverpool
 from provider.mercado_libre.motor import MercadoLibre
-from provider.mercado_libre.utils import Category
+from provider.mercado_libre.options import Category
 from provider.palacio_de_hierro.motor import PalacioDeHierro
+
+from .registry import MotorRegistry
 
 
 def _slug(text: str) -> str:
@@ -47,7 +48,6 @@ def _storage_path(provider: str, search_term: str, qualifier: str = "") -> str:
     return f"{provider}/{name}.json"
 
 
-@_REGISTRY.factory("ml")
 def _ml_factory(
     search_term: str,
     category: Category = Category.consolas_videojuegos,
@@ -71,7 +71,6 @@ def _ml_factory(
     return MercadoLibre(search_term, category, url=url, storage_path=path)
 
 
-@_REGISTRY.factory("az")
 def _az_factory(
     search_term: str,
     seller: Seller = Seller.none,
@@ -90,7 +89,6 @@ def _az_factory(
     return Amazon(search_term, seller, storage_path=path)
 
 
-@_REGISTRY.factory("lv")
 def _lv_factory(search_term: str, url: str, **_) -> Liverpool:
     """
     Liverpool jobs are always identified by their explicit search_term label
@@ -104,7 +102,6 @@ def _lv_factory(search_term: str, url: str, **_) -> Liverpool:
     return Liverpool(search_term, url, storage_path=path)
 
 
-@_REGISTRY.factory("ph")
 def _ph_factory(search_term: str, url: str, **_) -> PalacioDeHierro:
     """
     Same convention as Liverpool.
@@ -114,3 +111,10 @@ def _ph_factory(search_term: str, url: str, **_) -> PalacioDeHierro:
     """
     path = _storage_path("palacio_de_hierro", search_term)
     return PalacioDeHierro(search_term, url, storage_path=path)
+
+
+def register_default_factories(registry: MotorRegistry) -> None:
+    registry.factory("ml")(_ml_factory)
+    registry.factory("az")(_az_factory)
+    registry.factory("lv")(_lv_factory)
+    registry.factory("ph")(_ph_factory)

@@ -5,16 +5,23 @@ working in this repository.
 
 ## Project Rules
 
-- Preserve the current runtime layout. `app.py`, `scrapper.py`, `scraper/`,
+- Preserve the current runtime layout. `app.py`, `shared/`, `scraper/`,
   `provider/`, `utils/`, `config/`, and `tests/` are the core boundaries.
+- Keep the repository root free of Python modules except `app.py`.
 - Do not mutate tracked or local scraper data under `data/` unless the user
   explicitly asks for a data migration or cleanup.
 - Never commit `config/telegram.yaml` or real Telegram credentials.
 - Use `rg` or `rg --files` for repository search.
-- Prefer the existing provider registry and factory pattern in
-  `provider/registry.py` and `provider/factories.py`.
-- Keep provider parsing isolated in provider modules. Shared behavior belongs in
-  `scraper/` only when more than one provider needs it.
+- Prefer the existing provider registry and factory pattern in `scraper/jobs/`.
+- Keep `provider/` limited to provider implementation subpackages. The package
+  root should contain only `__init__.py`.
+- Keep provider parsing, URL building, options/enums, selectors, and
+  provider-local helpers inside the provider subpackage.
+- Avoid new generic provider `utils.py` modules; prefer names such as
+  `parser.py`, `urls.py`, `options.py`, or `selectors.py`.
+- Put stable contracts used by both providers and scraper orchestration in
+  `shared/`. `shared/` must not import from `provider/` or `scraper/`.
+- Keep `scraper/` for scraper-owned job assembly and runtime orchestration.
 - Keep config names aligned with the current YAML files:
   `config/jobs.yaml`, `config/motors.yaml`, and `config/scrapper.yaml`.
 - Run `python -m unittest discover -v` after behavior changes.
@@ -37,9 +44,12 @@ python -m pip install -r requirements-dev.txt
 
 ## Implementation Notes
 
-- `Scrapper` runs one loop per provider and limits concurrency per provider.
-- `Motor` owns shared scrape, fetch, persistence, and reconciliation flow.
-- Provider factories convert job entries into concrete motors and storage paths.
+- `Scrapper` in `scraper/runtime/orchestrator.py` runs one loop per provider
+  and limits concurrency per provider.
+- `Motor` in `shared/scraping/` owns shared scrape, fetch, persistence, and
+  reconciliation flow.
+- Provider factories in `scraper/jobs/` convert job entries into concrete motors
+  and storage paths.
 - Fetching uses either `aiohttp` or Playwright browser mode based on
   `FETCH_STRATEGY`.
 - Persisted product records are JSON lists below `DATA_PATH`.

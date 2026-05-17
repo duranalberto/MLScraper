@@ -63,6 +63,7 @@ During startup it returns `503` until the scraper leaves the `starting` state.
 - `browser_timeout`: increase `FETCH_TIMEOUT_SECONDS` or adjust
   `BROWSER_WAIT_SELECTOR`.
 - `browser_blocked`: review provider block selectors and backoff settings.
+- Provider concurrency: adjust `CONCURRENCY_LIMIT` in `config/motors.yaml`.
 - Empty persisted results: check provider parser tests and source markup.
 
 ## Data Safety
@@ -70,3 +71,6 @@ During startup it returns `503` until the scraper leaves the `starting` state.
 Runtime JSON files live under `DATA_PATH`. The repository keeps `data/.gitignore`
 so local scrape output is not committed. Treat files in `data/` as operational
 state, not source code.
+
+The tracked historical archive `data/data.zip` should be removed from tracking
+only with explicit data cleanup approval.

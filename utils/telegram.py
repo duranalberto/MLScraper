@@ -32,7 +32,8 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-_CONFIG_PATH = Path("config/telegram.yaml")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_CONFIG_PATH = _REPO_ROOT / "config" / "telegram.yaml"
 
 # ---------------------------------------------------------------------------
 # Credential loading
@@ -158,10 +159,12 @@ def _format_price_drop(element: dict) -> Optional[str]:
     search_term = element.get("search_term", "Item")
     title = element.get("title", "Untitled")
     url = element.get("url", "")
-    price = element.get("price", 0)
-    percent_change = abs(element.get("percent_change", 0))
     history = element.get("history", [{}])
-    last_price = history[0].get("price", 0) if history else 0
+    last_price = _coerce_number(
+        element.get("previous_price", history[0].get("price", 0) if history else 0)
+    )
+    price = _coerce_number(element.get("new_price", element.get("price", 0)))
+    percent_change = abs(_coerce_number(element.get("percent_change", 0)))
     dt = history[0].get("datetime", "Unknown") if history else "Unknown"
     savings = last_price - price
 
@@ -174,3 +177,16 @@ def _format_price_drop(element: dict) -> Optional[str]:
         f"💸 Save ${savings:,.2f} ({percent_change:.1f}% OFF)\n\n"
         f"🕒 Updated: {dt}"
     )
+
+
+def _coerce_number(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.replace(",", "").strip()
+        if cleaned:
+            try:
+                return float(cleaned)
+            except ValueError:
+                return 0.0
+    return 0.0

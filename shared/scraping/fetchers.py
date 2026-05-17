@@ -24,10 +24,14 @@ class AioHttpFetcher:
 
         while attempt < retries:
             try:
+                timeout_seconds = max(1, int(motor.FETCH_TIMEOUT_SECONDS))
                 async with session.get(
                     url,
                     headers=get_random_header(),
-                    timeout=ClientTimeout(connect=10, sock_read=30),
+                    timeout=ClientTimeout(
+                        connect=min(10, timeout_seconds),
+                        sock_read=timeout_seconds,
+                    ),
                 ) as resp:
                     if resp.status == 200:
                         return await resp.text()

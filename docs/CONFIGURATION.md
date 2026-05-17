@@ -45,14 +45,14 @@ Provider-specific sections use class names such as `Amazon`, `MercadoLibre`,
 
 ## `config/scrapper.yaml`
 
-Controls scheduler-level defaults:
+Controls scheduler-level backoff policy:
 
-- `DEFAULT_PROVIDER_CONCURRENCY`: fallback concurrency when a motor has no
-  explicit limit.
 - `BACKOFF_INITIAL`: first scheduler backoff after a provider loop error.
 - `BACKOFF_MAX`: maximum scheduler backoff after repeated provider loop errors.
 
-The current scrape cycle sleep is set in `Scrapper.sleep_time`.
+Provider concurrency is configured with `CONCURRENCY_LIMIT` in
+`config/motors.yaml`. The current scrape cycle sleep is set in
+`Scrapper.sleep_time`.
 
 ## Telegram
 
@@ -85,3 +85,7 @@ DATA_PATH=/MLScraper/data
 
 and mounts local `./data` into the container. Storage paths must stay relative
 to `DATA_PATH`.
+
+The historical tracked archive `data/data.zip` is left untouched by normal
+config/helper maintenance. Remove it from tracking only as part of an explicit
+data cleanup.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from scraper.motor import Motor
+from shared.scraping.motor import Motor
 
 logger = logging.getLogger(__name__)
 

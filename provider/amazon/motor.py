@@ -1,8 +1,9 @@
 import re
 import urllib.parse
 from bs4 import BeautifulSoup
-from scraper.motor import Motor
-from .utils import Seller
+from shared.scraping.motor import Motor
+
+from .options import Seller
 
 
 class Amazon(Motor):

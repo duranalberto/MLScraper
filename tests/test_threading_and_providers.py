@@ -1,22 +1,38 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import json
+import os
+import tempfile
 import unittest
 from collections import Counter
 from contextlib import suppress
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
-from scraper.article import Article
-from scraper.fetchers import BrowserFetcher
-from scraper.motor import Motor
-from scrapper import Scrapper
+import scraper.runtime.orchestrator as orchestrator_module
+from aiohttp import ClientTimeout
+from scraper.runtime.config import RuntimeConfig
+from scraper.runtime.notifications import broadcast_is_updated, broadcast_new_element
+from shared.articles.article import Article
+from shared.articles.lifecycle import ArticleLifecycle
+from shared.articles.status import Status
+from shared.articles.stream import Stream
+from shared.scraping.fetchers import AioHttpFetcher, BrowserFetcher
+from shared.scraping.motor import Motor
+from scraper.runtime.orchestrator import Scrapper
+from utils.header_profiles import HEADER_PROFILES
+from utils.headers import _base_headers, get_random_header
+from utils import telegram
+from utils.telegram import _format_price_drop
 from provider.amazon.motor import Amazon
-from provider.amazon.utils import Seller
+from provider.amazon.options import Seller
 from provider.liverpool.motor import Liverpool
+from scraper.jobs.loader import load_jobs
+from provider.mercado_libre import parser as mercado_libre_parser
 from provider.mercado_libre.motor import MercadoLibre
-from provider.mercado_libre.utils import Category
+from provider.mercado_libre.options import Category
 from provider.palacio_de_hierro.motor import PalacioDeHierro
 
 
@@ -87,6 +103,42 @@ class FetchDummyMotor:
         self.blocked_reason = reason
 
 
+class AioHttpDummyMotor:
+    FETCH_TIMEOUT_SECONDS = 45
+    MAX_RATE_LIMIT_RETRIES = 3
+    BLOCKED_BACKOFF_SECONDS = 0
+    debug = False
+
+    def _retry_after_delay(self, value):
+        return 0
+
+    def mark_blocked(self, reason: str, cooldown: float | int | None = None) -> None:
+        self.blocked_reason = reason
+
+
+class FakeAioHttpResponse:
+    status = 200
+    headers: dict[str, str] = {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def text(self) -> str:
+        return "<html></html>"
+
+
+class CapturingAioHttpSession:
+    def __init__(self) -> None:
+        self.timeout: ClientTimeout | None = None
+
+    def get(self, url: str, *, headers: dict[str, str], timeout: ClientTimeout):
+        self.timeout = timeout
+        return FakeAioHttpResponse()
+
+
 class FakeLocator:
     def __init__(self, count: int) -> None:
         self._count = count
@@ -128,30 +180,14 @@ class FakeContext:
         return self.page
 
 
-def make_scrapper(motors: list[DummyMotor]) -> Scrapper:
-    scrapper = Scrapper.__new__(Scrapper)
-    scrapper.sleep_time = 400
-    scrapper.motors = motors
-    scrapper._provider_semaphores = {}
-    scrapper._provider_limits = {}
-    scrapper._provider_active = Counter()
-    scrapper._provider_waiting = Counter()
-    scrapper._provider_job_counts = Counter(motor.provider_key for motor in motors)
-    scrapper._motors_by_provider = {}
-    scrapper._provider_cycle_health = {}
-    scrapper.health = {
-        "status": "starting",
-        "last_cycle_finished_at": None,
-        "last_cycle_duration_s": None,
-        "motor_count": len(motors),
-        "providers": {},
-    }
-    for motor in motors:
-        scrapper._motors_by_provider.setdefault(motor.provider_key, []).append(motor)
-        scrapper._configured_provider_limit(motor.provider_key, motor.CONCURRENCY_LIMIT)
-        scrapper._ensure_provider_cycle_health(motor.provider_key)
-    scrapper._refresh_provider_health()
-    return scrapper
+def make_scrapper(
+    motors: list[DummyMotor],
+    runtime_config: RuntimeConfig | None = None,
+) -> Scrapper:
+    return Scrapper(
+        motors=motors,
+        runtime_config=runtime_config or RuntimeConfig(backoff_initial=1, backoff_max=1),
+    )
 
 
 async def wait_until(predicate, timeout: float = 1.0) -> None:
@@ -168,6 +204,90 @@ async def cancel_task(task: asyncio.Task) -> None:
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
+
+
+class PackageBoundaryTests(unittest.TestCase):
+    def test_root_contains_only_app_entrypoint(self) -> None:
+        root_files = sorted(path.name for path in Path(".").glob("*.py"))
+
+        self.assertEqual(root_files, ["app.py"])
+
+    def test_provider_root_contains_only_package_initializer(self) -> None:
+        root_files = sorted(path.name for path in Path("provider").glob("*.py"))
+
+        self.assertEqual(root_files, ["__init__.py"])
+
+    def test_scraper_root_contains_only_package_initializer(self) -> None:
+        root_files = sorted(path.name for path in Path("scraper").glob("*.py"))
+
+        self.assertEqual(root_files, ["__init__.py"])
+
+    def test_shared_does_not_import_provider_or_scraper(self) -> None:
+        offenders = self._imports_from_package(Path("shared"), {"provider", "scraper"})
+
+        self.assertEqual(offenders, [])
+
+    def test_provider_does_not_import_scraper(self) -> None:
+        offenders = self._imports_from_package(Path("provider"), {"scraper"})
+
+        self.assertEqual(offenders, [])
+
+    def test_removed_legacy_import_paths_are_absent(self) -> None:
+        legacy_paths = [
+            ".".join(parts)
+            for parts in [
+                ("provider", "loader"),
+                ("provider", "factories"),
+                ("provider", "registry"),
+                ("provider", "generator"),
+                ("scraper", "article"),
+                ("scraper", "article_lifecycle"),
+                ("scraper", "article_repository"),
+                ("scraper", "fetchers"),
+                ("scraper", "motor"),
+                ("scraper", "motor_config"),
+                ("scraper", "status"),
+                ("scraper", "stream"),
+            ]
+        ]
+        offenders: list[str] = []
+        for path in self._python_files(Path(".")):
+            source = path.read_text(encoding="utf-8")
+            for legacy_path in legacy_paths:
+                if legacy_path in source:
+                    offenders.append(f"{path}:{legacy_path}")
+
+        self.assertEqual(offenders, [])
+
+    def test_removed_root_scrapper_module_is_not_imported(self) -> None:
+        offenders = self._imports_from_package(Path("."), {"scrapper"})
+
+        self.assertEqual(offenders, [])
+
+    @staticmethod
+    def _python_files(root: Path) -> list[Path]:
+        return sorted(
+            path
+            for path in root.rglob("*.py")
+            if "__pycache__" not in path.parts and "data" not in path.parts
+        )
+
+    def _imports_from_package(self, root: Path, forbidden: set[str]) -> list[str]:
+        offenders: list[str] = []
+        for path in self._python_files(root):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""]
+                else:
+                    continue
+                for name in names:
+                    package = name.split(".", 1)[0]
+                    if package in forbidden:
+                        offenders.append(f"{path}:{name}")
+        return offenders
 
 
 class ProviderConcurrencyTests(unittest.IsolatedAsyncioTestCase):
@@ -212,6 +332,18 @@ class ProviderConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         scrapper._get_provider_semaphore("bad", 0)
 
         self.assertEqual(scrapper.health["providers"]["bad"]["configured_limit"], 1)
+
+    def test_missing_provider_limit_uses_internal_fallback(self) -> None:
+        probe = Probe()
+        scrapper = make_scrapper([DummyMotor("fallback", None, probe)])
+
+        self.assertEqual(scrapper.health["providers"]["fallback"]["configured_limit"], 1)
+
+    def test_legacy_max_concurrent_motors_fallback_was_removed(self) -> None:
+        source = Path(orchestrator_module.__file__).read_text(encoding="utf-8")
+
+        self.assertNotIn("MAX_CONCURRENT_MOTORS", source)
+        self.assertEqual(orchestrator_module.DEFAULT_PROVIDER_CONCURRENCY, 1)
 
 
 class ProviderCycleSchedulerTests(unittest.IsolatedAsyncioTestCase):
@@ -269,7 +401,10 @@ class ProviderCycleSchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_loop_failure_does_not_stop_other_providers(self) -> None:
         failing = CycleDummyMotor("failing", delay=0.0)
         healthy = CycleDummyMotor("healthy", delay=0.005)
-        scrapper = make_scrapper([failing, healthy])
+        scrapper = make_scrapper(
+            [failing, healthy],
+            RuntimeConfig(backoff_initial=0.05, backoff_max=0.05),
+        )
         scrapper.sleep_time = 0.005
         original_scrape_with_limit = scrapper._scrape_with_limit
 
@@ -280,24 +415,169 @@ class ProviderCycleSchedulerTests(unittest.IsolatedAsyncioTestCase):
 
         scrapper._scrape_with_limit = scrape_with_scheduler_failure
 
-        with patch("scrapper._BACKOFF_INITIAL", 0.05), patch("scrapper._BACKOFF_MAX", 0.05):
-            task = asyncio.create_task(scrapper.run())
-            try:
-                await wait_until(
-                    lambda: (
-                        scrapper.health["providers"]["failing"]["status"] == "error"
-                        and scrapper.health["providers"]["healthy"]["cycle_count"] >= 1
-                    )
+        task = asyncio.create_task(scrapper.run())
+        try:
+            await wait_until(
+                lambda: (
+                    scrapper.health["providers"]["failing"]["status"] == "error"
+                    and scrapper.health["providers"]["healthy"]["cycle_count"] >= 1
                 )
+            )
 
-                failing_health = scrapper.health["providers"]["failing"]
-                healthy_health = scrapper.health["providers"]["healthy"]
-                self.assertEqual(failing_health["last_error"], "scheduler boom")
-                self.assertEqual(failing_health["cycle_count"], 0)
-                self.assertEqual(healthy_health["status"], "ok")
-                self.assertGreaterEqual(healthy_health["cycle_count"], 1)
+            failing_health = scrapper.health["providers"]["failing"]
+            healthy_health = scrapper.health["providers"]["healthy"]
+            self.assertEqual(failing_health["last_error"], "scheduler boom")
+            self.assertEqual(failing_health["cycle_count"], 0)
+            self.assertEqual(healthy_health["status"], "ok")
+            self.assertGreaterEqual(healthy_health["cycle_count"], 1)
+        finally:
+            await cancel_task(task)
+
+
+class BroadcastNotificationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_item_logs_when_not_initial_scrape(self) -> None:
+        element = {
+            "search_term": "Nintendo",
+            "title": "Nintendo 3DS",
+            "price": 2500.0,
+            "url": "https://example.test/item",
+            "is_initial_scrape": False,
+        }
+        send_new = AsyncMock()
+        logger = Mock()
+
+        await broadcast_new_element(element, send_new=send_new, logger=logger)
+
+        logger.info.assert_called_once_with(
+            "NEW ITEM: %s | %s | $%s | %s",
+            "Nintendo",
+            "Nintendo 3DS",
+            2500.0,
+            "https://example.test/item",
+        )
+        send_new.assert_awaited_once_with(element)
+
+    async def test_new_item_log_is_suppressed_on_initial_scrape(self) -> None:
+        element = {
+            "search_term": "Nintendo",
+            "title": "Nintendo 3DS",
+            "price": 2500.0,
+            "url": "https://example.test/item",
+            "is_initial_scrape": True,
+        }
+        send_new = AsyncMock()
+        logger = Mock()
+
+        await broadcast_new_element(element, send_new=send_new, logger=logger)
+
+        logger.info.assert_not_called()
+        send_new.assert_awaited_once_with(element)
+
+    async def test_price_drop_broadcast_includes_previous_and_new_price(self) -> None:
+        element = {
+            "search_term": "Nintendo",
+            "title": "Nintendo 3DS",
+            "price": 1500.0,
+            "url": "https://example.test/item",
+            "history": [{"price": 2000.0, "datetime": "2026-01-01"}],
+        }
+        send_drop = AsyncMock()
+        logger = Mock()
+
+        await broadcast_is_updated(element, send_price_drop=send_drop, logger=logger)
+
+        self.assertEqual(element["previous_price"], 2000.0)
+        self.assertEqual(element["new_price"], 1500.0)
+        self.assertEqual(element["percent_change"], "25.00")
+        logger.info.assert_called_once_with(
+            "PRICE DROP: %s | $%.2f -> $%.2f (%s%%) — %s",
+            "Nintendo 3DS",
+            2000.0,
+            1500.0,
+            "25.00",
+            "https://example.test/item",
+        )
+        send_drop.assert_awaited_once_with(element)
+
+
+class TelegramFormatterTests(unittest.TestCase):
+    def test_price_drop_message_uses_previous_and_new_price(self) -> None:
+        message = _format_price_drop(
+            {
+                "search_term": "Nintendo",
+                "title": "Nintendo 3DS",
+                "url": "https://example.test/item",
+                "previous_price": 2000.0,
+                "new_price": 1500.0,
+                "percent_change": "25.00",
+                "history": [{"datetime": "2026-01-01"}],
+            }
+        )
+
+        self.assertIsNotNone(message)
+        self.assertIn("$2,000.00", message)
+        self.assertIn("$1,500.00 MXN", message)
+        self.assertIn("Save $500.00", message)
+        self.assertIn("25.0% OFF", message)
+
+
+class ConfigPathResolutionTests(unittest.TestCase):
+    def test_default_jobs_path_is_repo_root_based(self) -> None:
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                os.chdir(tmpdir)
+                jobs = load_jobs()
             finally:
-                await cancel_task(task)
+                os.chdir(original_cwd)
+
+        self.assertEqual(len(jobs), 8)
+        self.assertEqual({job["provider"] for job in jobs}, {"az", "lv", "ml", "ph"})
+
+    def test_telegram_config_path_is_repo_root_based(self) -> None:
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                os.chdir(tmpdir)
+                token, chat_id = telegram._load_config()
+            finally:
+                os.chdir(original_cwd)
+
+        self.assertTrue(telegram._CONFIG_PATH.is_absolute())
+        self.assertEqual((token, chat_id), ("", ""))
+
+
+class ArticleLifecycleTests(unittest.TestCase):
+    def test_missing_article_moves_from_active_to_finished_after_threshold(self) -> None:
+        active = Stream(Status.active)
+        on_hold = Stream(Status.on_hold)
+        finished = Stream(Status.finished)
+        lifecycle = ArticleLifecycle(
+            active,
+            on_hold,
+            finished,
+            Article.create,
+            hold_miss_threshold=2,
+        )
+
+        article, is_new, is_updated = lifecycle.save(
+            {"identifier": "item-1", "title": "Console", "price": 100.0}
+        )
+
+        self.assertIsNotNone(article)
+        self.assertTrue(is_new)
+        self.assertFalse(is_updated)
+        self.assertEqual(len(active), 1)
+
+        lifecycle.save(article, to_status=Status.on_hold, at_beginning=False)
+        self.assertEqual(len(active), 0)
+        self.assertEqual(len(on_hold), 1)
+        self.assertEqual(on_hold.get_list()[0].hold_misses, 1)
+
+        lifecycle.save(article, to_status=Status.on_hold, at_beginning=False)
+        self.assertEqual(len(on_hold), 0)
+        self.assertEqual(len(finished), 1)
+        self.assertEqual(finished.get_list()[0].status, Status.finished)
 
 
 class FetchStrategyConfigTests(unittest.TestCase):
@@ -318,12 +598,23 @@ class FetchStrategyConfigTests(unittest.TestCase):
 
 
 class FetchDelegationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_aiohttp_fetch_uses_configured_timeout(self) -> None:
+        motor = AioHttpDummyMotor()
+        session = CapturingAioHttpSession()
+
+        html = await AioHttpFetcher().fetch(motor, session, "https://example.test")
+
+        self.assertEqual(html, "<html></html>")
+        self.assertIsNotNone(session.timeout)
+        self.assertEqual(session.timeout.connect, 10)
+        self.assertEqual(session.timeout.sock_read, 45)
+
     async def test_motor_delegates_to_configured_fetcher(self) -> None:
         motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
         fake_fetcher = AsyncMock()
         fake_fetcher.fetch.return_value = "<html></html>"
 
-        with patch("scraper.motor.get_fetcher", return_value=fake_fetcher) as get_fetcher:
+        with patch("shared.scraping.motor.get_fetcher", return_value=fake_fetcher) as get_fetcher:
             html = await motor._fetch(session=None, url="https://example.test")
 
         self.assertEqual(html, "<html></html>")
@@ -336,7 +627,7 @@ class FetchDelegationTests(unittest.IsolatedAsyncioTestCase):
         fake_fetcher = AsyncMock()
         fake_fetcher.fetch.return_value = "<html></html>"
 
-        with patch("scraper.motor.get_fetcher", return_value=fake_fetcher) as get_fetcher:
+        with patch("shared.scraping.motor.get_fetcher", return_value=fake_fetcher) as get_fetcher:
             await motor._fetch(session=None, url="https://example.test")
 
         get_fetcher.assert_called_once_with("browser")
@@ -508,6 +799,22 @@ class ProviderParserFixtureTests(unittest.TestCase):
         )
         self.assertIsNone(next_url)
 
+    def test_mercado_libre_parser_reports_blocked_js_gate(self) -> None:
+        html = """
+        <html>
+          <body>This page requires JavaScript. Please enable JavaScript.</body>
+        </html>
+        """
+
+        result = mercado_libre_parser.parse_search_page(
+            html,
+            "https://listado.mercadolibre.com.mx/consolas-videojuegos/test_NoIndex_True",
+        )
+
+        self.assertEqual(result.items, [])
+        self.assertIsNone(result.next_url)
+        self.assertEqual(result.blocked_reason, "mercado_libre_js_required")
+
     def test_mercado_libre_parser_handles_saved_root_source_fixture(self) -> None:
         fixture = Path(
             "https___listado.mercadolibre.com.mx_consolas-videojuegos_consolas_nintendo_usado_new-nintendo-3ds-xl_NoIndex_True.html"
@@ -581,6 +888,23 @@ class ProviderParserFixtureTests(unittest.TestCase):
             ],
         )
         self.assertEqual(next_url, "https://listado.mercadolibre.com.mx/test_Desde_49_NoIndex_True")
+
+
+class HeaderGenerationTests(unittest.TestCase):
+    def test_base_headers_render_required_browser_fields(self) -> None:
+        headers = _base_headers(HEADER_PROFILES[0])
+
+        self.assertIn("User-Agent", headers)
+        self.assertIn("Accept-Language", headers)
+        self.assertIn("Accept-Encoding", headers)
+        self.assertIn("Sec-Fetch-Site", headers)
+
+    def test_get_random_header_preserves_public_api(self) -> None:
+        headers = get_random_header()
+
+        self.assertIsInstance(headers, dict)
+        self.assertIn("User-Agent", headers)
+        self.assertIn("Accept", headers)
 
 
 if __name__ == "__main__":
