@@ -6,6 +6,7 @@ from .article import Article
 
 logger = logging.getLogger(__name__)
 
+
 class Stream:
     def __init__(self, status: Status = Status.none, _list: Optional[List[Article]] = None):
         self.status = status
@@ -51,13 +52,13 @@ class Stream:
                     self._list.append(article)
                 return article
         return None
-    
+
     def update(self, article: Article) -> Optional[Article]:
         """Updates an existing article in the stream if title or price changed."""
         if article and article in self._list:
             index = self._list.index(article)
             target = self._list[index]
-            was_updated = target.update({'title': article.title, 'price': article.price})
+            was_updated = target.update({"title": article.title, "price": article.price})
             return target if was_updated else None
         return None
 

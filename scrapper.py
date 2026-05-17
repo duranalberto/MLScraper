@@ -33,16 +33,12 @@ def _load_scrapper_config() -> dict[str, Any]:
         data = yaml.safe_load(fh) or {}
 
     if not isinstance(data, dict):
-        raise ValueError(
-            f"'{_CONFIG_PATH}' must contain a YAML mapping at the top level."
-        )
+        raise ValueError(f"'{_CONFIG_PATH}' must contain a YAML mapping at the top level.")
 
     required = ("BACKOFF_INITIAL", "BACKOFF_MAX")
     missing = [key for key in required if key not in data]
     if missing:
-        raise KeyError(
-            f"Missing required scrapper config key(s) {missing!r} in '{_CONFIG_PATH}'."
-        )
+        raise KeyError(f"Missing required scrapper config key(s) {missing!r} in '{_CONFIG_PATH}'.")
 
     return data
 
@@ -67,7 +63,9 @@ class Scrapper:
         self._provider_limits: dict[str, int] = {}
         self._provider_active: Counter[str] = Counter()
         self._provider_waiting: Counter[str] = Counter()
-        self._provider_job_counts: Counter[str] = Counter(motor.provider_key for motor in self.motors)
+        self._provider_job_counts: Counter[str] = Counter(
+            motor.provider_key for motor in self.motors
+        )
         self._motors_by_provider: dict[str, list[Motor]] = {}
         self._provider_cycle_health: dict[str, dict[str, Any]] = {}
         for motor in self.motors:
@@ -132,9 +130,7 @@ class Scrapper:
             self._refresh_provider_health()
 
             try:
-                await asyncio.gather(
-                    *(self._scrape_with_limit(motor) for motor in motors)
-                )
+                await asyncio.gather(*(self._scrape_with_limit(motor) for motor in motors))
             except Exception as exc:
                 provider_health = self._ensure_provider_cycle_health(provider)
                 provider_health.update(
@@ -178,7 +174,6 @@ class Scrapper:
             logger.info("Provider '%s' scraping cycle finished in %.2fs.", provider, duration)
 
             await asyncio.sleep(self.sleep_time)
-
 
     async def _scrape_with_limit(self, motor: Motor) -> None:
         provider = motor.provider_key
@@ -272,7 +267,9 @@ class Scrapper:
         self.health["providers"] = {
             provider: {
                 **self._ensure_provider_cycle_health(provider),
-                "configured_limit": self._provider_limits.get(provider, DEFAULT_PROVIDER_CONCURRENCY),
+                "configured_limit": self._provider_limits.get(
+                    provider, DEFAULT_PROVIDER_CONCURRENCY
+                ),
                 "job_count": self._provider_job_counts.get(provider, 0),
                 "active_jobs": max(0, self._provider_active.get(provider, 0)),
                 "queued_jobs": max(0, self._provider_waiting.get(provider, 0)),
@@ -310,10 +307,13 @@ class Scrapper:
             return
 
         last_value = self._parse_price(history[0]["price"])
-        new_value  = self._parse_price(element.get("price"))
+        new_value = self._parse_price(element.get("price"))
 
         if last_value is None or new_value is None:
-            logger.debug("Skipping price-drop check for '%s': unparseable price value.", element.get("title", "<unknown>"))
+            logger.debug(
+                "Skipping price-drop check for '%s': unparseable price value.",
+                element.get("title", "<unknown>"),
+            )
             return
 
         if last_value <= 0:
@@ -323,7 +323,12 @@ class Scrapper:
 
         if percent_change <= -14:
             element["percent_change"] = f"{abs(percent_change):.2f}"
-            logger.info("PRICE DROP: %s (%s%%) — %s", element.get("title"), element["percent_change"], element.get("url"))
+            logger.info(
+                "PRICE DROP: %s (%s%%) — %s",
+                element.get("title"),
+                element["percent_change"],
+                element.get("url"),
+            )
             await send_price_drop_to_telegram(element)
 
     @staticmethod

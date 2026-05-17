@@ -23,6 +23,7 @@ class HeaderProfile:
     sec_ch_ua_full_version_list: str | None = None
     sec_ch_ua_platform_version: str | None = None
 
+
 def _supported_accept_encoding() -> str:
     encodings = ["gzip", "deflate"]
     if find_spec("brotli") is not None or find_spec("brotlicffi") is not None:
@@ -72,7 +73,7 @@ def _chromium_profile(
         sec_gpc=sec_gpc,
         sec_fetch_site=sec_fetch_site,
         sec_ch_ua=sec_ua,
-        sec_ch_ua_mobile='?0',
+        sec_ch_ua_mobile="?0",
         sec_ch_ua_platform=f'"{platform}"',
         sec_ch_ua_arch=f'"{arch}"',
         sec_ch_ua_bitness=f'"{bitness}"',

@@ -59,7 +59,7 @@ class AioHttpFetcher:
                         logger.warning("HTTP %s for %s", resp.status, url)
                     if resp.status in {403, 404}:
                         break
-            except (ClientError, asyncio.TimeoutError):
+            except ClientError, asyncio.TimeoutError:
                 if motor.debug:
                     logger.warning(
                         "Transient fetch error for %s (attempt %d/%d).",
@@ -70,7 +70,7 @@ class AioHttpFetcher:
 
             attempt += 1
             if attempt < retries:
-                await asyncio.sleep(0.5 * (2 ** attempt))
+                await asyncio.sleep(0.5 * (2**attempt))
 
         return None
 
@@ -103,7 +103,11 @@ class BrowserFetcher:
             await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             return await self._wait_for_page(motor, page)
         except Exception as exc:
-            reason = "browser_timeout" if exc.__class__.__name__ == "TimeoutError" else "browser_navigation_error"
+            reason = (
+                "browser_timeout"
+                if exc.__class__.__name__ == "TimeoutError"
+                else "browser_navigation_error"
+            )
             motor.mark_blocked(reason, motor.BLOCKED_BACKOFF_SECONDS)
             if motor.debug:
                 logger.warning("Browser fetch failed for %s: %s", url, exc)

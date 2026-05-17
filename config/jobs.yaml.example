@@ -1,0 +1,23 @@
+# Safe scraping job catalogue template.
+# Copy selected entries into config/jobs.yaml and edit values for your use case.
+
+jobs:
+  # Mercado Libre
+  - provider: ml
+    search_term: nintendo 3ds
+    category: consolas
+
+  # Amazon Mexico
+  - provider: az
+    search_term: macbook
+    seller: amazon_mx
+
+  # Liverpool requires an explicit URL.
+  - provider: lv
+    search_term: Laptops
+    url: "https://www.liverpool.com.mx/tienda/Laptops/example"
+
+  # Palacio de Hierro requires an explicit URL.
+  - provider: ph
+    search_term: Macbook
+    url: "https://www.elpalaciodehierro.com/buscar?q=macbook"

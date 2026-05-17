@@ -96,7 +96,12 @@ class FakeLocator:
 
 
 class FakePage:
-    def __init__(self, selectors: dict[str, int], content: str = "<html></html>", url: str = "https://example.test") -> None:
+    def __init__(
+        self,
+        selectors: dict[str, int],
+        content: str = "<html></html>",
+        url: str = "https://example.test",
+    ) -> None:
         self.selectors = selectors
         self._content = content
         self.url = url
@@ -220,8 +225,7 @@ class ProviderCycleSchedulerTests(unittest.IsolatedAsyncioTestCase):
         try:
             await wait_until(
                 lambda: (
-                    scrapper.health["providers"]["fast"]["cycle_count"] >= 2
-                    and slow.started == 1
+                    scrapper.health["providers"]["fast"]["cycle_count"] >= 2 and slow.started == 1
                 )
             )
 
@@ -256,7 +260,9 @@ class ProviderCycleSchedulerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fast_health["last_error"], None)
             self.assertEqual(slow_health["status"], "running")
             self.assertEqual(slow_health["cycle_count"], 0)
-            self.assertEqual(scrapper.health["last_cycle_finished_at"], fast_health["last_cycle_finished_at"])
+            self.assertEqual(
+                scrapper.health["last_cycle_finished_at"], fast_health["last_cycle_finished_at"]
+            )
         finally:
             await cancel_task(task)
 
@@ -382,7 +388,9 @@ class MercadoLibreStabilityTests(unittest.IsolatedAsyncioTestCase):
         </html>
         """
         motor = MercadoLibre("pokemon ds", Category.consolas, storage_path="tests/ml-js-gate.json")
-        existing = Article(identifier="MLM123", title="Pokemon", price=100.0, url="https://example.test/item")
+        existing = Article(
+            identifier="MLM123", title="Pokemon", price=100.0, url="https://example.test/item"
+        )
         motor.active.add(existing)
 
         async def fake_fetch(session, url, retries=3):
@@ -401,7 +409,9 @@ class MercadoLibreStabilityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_browser_fetch_timeout_does_not_reconcile_missing_items(self) -> None:
         motor = MercadoLibre("pokemon ds", Category.consolas, storage_path="tests/ml-timeout.json")
-        existing = Article(identifier="MLM123", title="Pokemon", price=100.0, url="https://example.test/item")
+        existing = Article(
+            identifier="MLM123", title="Pokemon", price=100.0, url="https://example.test/item"
+        )
         motor.active.add(existing)
 
         async def fake_fetch(session, url, retries=3):
@@ -456,8 +466,14 @@ class ProviderParserFixtureTests(unittest.TestCase):
                 }
             }
         }
-        html = f"<script id='__NEXT_DATA__' type='application/json'>{json.dumps(page_object)}</script>"
-        motor = Liverpool("Laptops", "https://www.liverpool.com.mx/tienda/Laptops/example", storage_path="tests/lv.json")
+        html = (
+            f"<script id='__NEXT_DATA__' type='application/json'>{json.dumps(page_object)}</script>"
+        )
+        motor = Liverpool(
+            "Laptops",
+            "https://www.liverpool.com.mx/tienda/Laptops/example",
+            storage_path="tests/lv.json",
+        )
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 
@@ -475,7 +491,11 @@ class ProviderParserFixtureTests(unittest.TestCase):
           <a href="/apple-macbook-air-test-45329637.html">MacBook Air Test</a>
         </div>
         """
-        motor = PalacioDeHierro("Macbook", "https://www.elpalaciodehierro.com/buscar?q=macbook", storage_path="tests/ph.json")
+        motor = PalacioDeHierro(
+            "Macbook",
+            "https://www.elpalaciodehierro.com/buscar?q=macbook",
+            storage_path="tests/ph.json",
+        )
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 
@@ -496,13 +516,17 @@ class ProviderParserFixtureTests(unittest.TestCase):
             self.skipTest("Mercado Libre root source fixture is not present.")
         html = fixture.read_text(encoding="utf-8", errors="replace")
         url = "https://listado.mercadolibre.com.mx/consolas-videojuegos/consolas/nintendo/usado/new-nintendo-3ds-xl_NoIndex_True"
-        motor = MercadoLibre("new nintendo 3ds xl", Category.consolas, storage_path="tests/ml-source.json")
+        motor = MercadoLibre(
+            "new nintendo 3ds xl", Category.consolas, storage_path="tests/ml-source.json"
+        )
 
         items, next_url = motor.scrape_page({"content": html, "url": url})
 
         self.assertEqual(len(items), 48)
         self.assertEqual(items[0]["identifier"], "MLMU3972668090")
-        self.assertEqual(items[0]["title"], "Nintendo New 3ds Xl Restaurado Con Magia, Leer Descripción")
+        self.assertEqual(
+            items[0]["title"], "Nintendo New 3ds Xl Restaurado Con Magia, Leer Descripción"
+        )
         self.assertEqual(items[0]["price"], 6000.0)
         self.assertEqual(next_url, f"{url.replace('_NoIndex_True', '_Desde_49_NoIndex_True')}")
 
@@ -522,7 +546,10 @@ class ProviderParserFixtureTests(unittest.TestCase):
                                     },
                                     "components": [
                                         {"type": "title", "title": {"text": "Nintendo Test"}},
-                                        {"type": "price", "price": {"current_price": {"value": 1234.5}}},
+                                        {
+                                            "type": "price",
+                                            "price": {"current_price": {"value": 1234.5}},
+                                        },
                                     ],
                                 }
                             }
@@ -542,12 +569,17 @@ class ProviderParserFixtureTests(unittest.TestCase):
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 
-        self.assertEqual(items, [{
-            "identifier": "MLMU123",
-            "title": "Nintendo Test",
-            "price": 1234.5,
-            "url": "https://www.mercadolibre.com.mx/test/up/MLMU123",
-        }])
+        self.assertEqual(
+            items,
+            [
+                {
+                    "identifier": "MLMU123",
+                    "title": "Nintendo Test",
+                    "price": 1234.5,
+                    "url": "https://www.mercadolibre.com.mx/test/up/MLMU123",
+                }
+            ],
+        )
         self.assertEqual(next_url, "https://listado.mercadolibre.com.mx/test_Desde_49_NoIndex_True")
 
 

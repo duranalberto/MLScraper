@@ -55,12 +55,14 @@ class PalacioDeHierro(Motor):
             if url.startswith("/"):
                 url = f"{self.BASE_DOMAIN}{url}"
 
-            items.append({
-                "identifier": str(identifier),
-                "title": title,
-                "price": price,
-                "url": url,
-            })
+            items.append(
+                {
+                    "identifier": str(identifier),
+                    "title": title,
+                    "price": price,
+                    "url": url,
+                }
+            )
         return items
 
     def _next_url(self, current_url, items_on_page, total, page_size) -> Optional[str]:
@@ -77,17 +79,27 @@ class PalacioDeHierro(Motor):
 
         qs["start"] = [str(next_start)]
         new_query = urllib.parse.urlencode(qs, doseq=True)
-        return urllib.parse.urlunparse((
-            parsed.scheme, parsed.netloc, parsed.path,
-            parsed.params, new_query, parsed.fragment,
-        ))
+        return urllib.parse.urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                new_query,
+                parsed.fragment,
+            )
+        )
 
     def _page_size(self, soup: BeautifulSoup) -> int:
         section = soup.select_one('section[data-component="search/ConstructorSearch"]')
         if section and section.has_attr("data-component-options"):
             try:
-                return int(json.loads(section["data-component-options"]).get("pageSize", _DEFAULT_PAGE_SIZE))
-            except (json.JSONDecodeError, ValueError):
+                return int(
+                    json.loads(section["data-component-options"]).get(
+                        "pageSize", _DEFAULT_PAGE_SIZE
+                    )
+                )
+            except json.JSONDecodeError, ValueError:
                 pass
         return _DEFAULT_PAGE_SIZE
 
@@ -96,6 +108,6 @@ class PalacioDeHierro(Motor):
         if grid:
             try:
                 return int(grid["data-cnstrc-num-results"])
-            except (ValueError, KeyError):
+            except ValueError, KeyError:
                 pass
         return 0

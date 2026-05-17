@@ -1,7 +1,7 @@
-#The base image for the container 
+#The base image for the container
 FROM    python:3.14.2-slim
- 
-# Keeps Python from generating .pyc files in the container 
+
+# Keeps Python from generating .pyc files in the container
 ENV     PYTHONDONTWRITEBYTECODE=1
 RUN     apt-get update && \
         apt-get install -yq tzdata && \
@@ -9,10 +9,10 @@ RUN     apt-get update && \
         dpkg-reconfigure -f noninteractive tzdata
 
 ENV     TZ="America/Los_Angeles"
- 
-# Turns off buffering for easier container logging 
-ENV     PYTHONUNBUFFERED=1 
- 
+
+# Turns off buffering for easier container logging
+ENV     PYTHONUNBUFFERED=1
+
 RUN     apt -y update
 RUN     apt -y install git
 RUN     git config --global user.name "Alberto Duran"

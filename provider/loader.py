@@ -169,9 +169,7 @@ def load_jobs(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[dict]:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        raise yaml.YAMLError(
-            f"Failed to parse YAML from '{path}': {exc}"
-        ) from exc
+        raise yaml.YAMLError(f"Failed to parse YAML from '{path}': {exc}") from exc
 
     if raw is None:
         logger.warning("'%s' is empty — no jobs loaded.", path)
@@ -189,9 +187,7 @@ def load_jobs(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[dict]:
         return []
 
     if not isinstance(jobs_raw, list):
-        raise ValueError(
-            f"'jobs' in '{path}' must be a list, got {type(jobs_raw).__name__}."
-        )
+        raise ValueError(f"'jobs' in '{path}' must be a list, got {type(jobs_raw).__name__}.")
 
     entries: list[dict] = []
     for index, raw_entry in enumerate(jobs_raw, start=1):

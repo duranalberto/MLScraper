@@ -22,6 +22,7 @@ class MotorRegistry:
                 logger.warning("Overwriting existing factory for provider '%s'.", provider)
             self._factories[provider] = fn
             return fn
+
         return decorator
 
     def register(self, entry: MotorEntry) -> None:
@@ -45,7 +46,9 @@ class MotorRegistry:
             factory = self._factories.get(provider)
 
             if factory is None:
-                logger.error("No factory registered for provider '%s' — skipping entry: %r", provider, entry)
+                logger.error(
+                    "No factory registered for provider '%s' — skipping entry: %r", provider, entry
+                )
                 continue
 
             kwargs = {k: v for k, v in entry.items() if k != "provider"}
@@ -54,7 +57,9 @@ class MotorRegistry:
                 motor = factory(**kwargs)
                 motors.append(motor)
             except Exception as exc:
-                logger.error("Failed to build motor for provider '%s' with %r: %s", provider, kwargs, exc)
+                logger.error(
+                    "Failed to build motor for provider '%s' with %r: %s", provider, kwargs, exc
+                )
 
         return motors
 

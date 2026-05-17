@@ -65,7 +65,7 @@ def _ml_factory(
     qualifier = (
         ""
         if category == Category.consolas_videojuegos
-        else category.name          # e.g. "consolas", "videojuegos", "deportes_jersey"
+        else category.name  # e.g. "consolas", "videojuegos", "deportes_jersey"
     )
     path = _storage_path("mercado_libre", search_term, qualifier)
     return MercadoLibre(search_term, category, url=url, storage_path=path)

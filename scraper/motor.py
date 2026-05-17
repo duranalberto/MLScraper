@@ -36,9 +36,7 @@ def _load_motor_config() -> dict[str, Any]:
         data = yaml.safe_load(fh) or {}
 
     if not isinstance(data, dict):
-        raise ValueError(
-            f"'{_CONFIG_PATH}' must contain a YAML mapping at the top level."
-        )
+        raise ValueError(f"'{_CONFIG_PATH}' must contain a YAML mapping at the top level.")
 
     return data
 
@@ -64,13 +62,13 @@ class Motor(ABC):
         storage_path: str,
         debug: bool = True,
     ) -> None:
-        self.search_term  = search_term
-        self.url          = url
+        self.search_term = search_term
+        self.url = url
         self.storage_path = storage_path
-        self.active       = Stream(Status.active)
-        self.on_hold      = Stream(Status.on_hold)
-        self.finished     = Stream(Status.finished)
-        self.debug        = debug
+        self.active = Stream(Status.active)
+        self.on_hold = Stream(Status.on_hold)
+        self.finished = Stream(Status.finished)
+        self.debug = debug
         self.blocked_until: float = 0.0
         self.blocked_reason: str | None = None
         self._scrape_incomplete: bool = False
@@ -266,11 +264,9 @@ class Motor(ABC):
                             await self._sleep_before_next_page()
 
         except Exception:
-            logger.error(
-                "Scrape for '%s' crashed:\n%s", self.search_term, format_exc()
-            )
+            logger.error("Scrape for '%s' crashed:\n%s", self.search_term, format_exc())
             return
-        
+
         if results or self.active.get_list() or self.on_hold.get_list():
             if not self._scrape_incomplete:
                 self._reconcile_missing(results)
@@ -290,9 +286,7 @@ class Motor(ABC):
                 )
 
     @abstractmethod
-    def scrape_page(
-        self, body: dict
-    ) -> Tuple[List[Any], Optional[str]]:
+    def scrape_page(self, body: dict) -> Tuple[List[Any], Optional[str]]:
         """Return (items_list, next_page_url_or_None)."""
 
     async def _scrape_page(
@@ -385,7 +379,9 @@ class Motor(ABC):
             if previously_finished is not None:
                 previously_finished.record_status_history(Status.active)
                 previously_finished.hold_misses = 0
-                updated = previously_finished.update({"title": article.title, "price": article.price})
+                updated = previously_finished.update(
+                    {"title": article.title, "price": article.price}
+                )
                 article = previously_finished
                 if updated:
                     is_updated = True
@@ -395,7 +391,9 @@ class Motor(ABC):
 
             if previously_on_hold is not None:
                 previously_on_hold.hold_misses = 0
-                updated = previously_on_hold.update({"title": article.title, "price": article.price})
+                updated = previously_on_hold.update(
+                    {"title": article.title, "price": article.price}
+                )
                 article = previously_on_hold
                 if updated:
                     is_updated = True
@@ -430,7 +428,9 @@ class Motor(ABC):
 
             removed_hold = self.on_hold.delete(article)
             if removed_hold is not None:
-                removed_hold.hold_misses = removed_hold.hold_misses + 1 if removed_hold.hold_misses else 1
+                removed_hold.hold_misses = (
+                    removed_hold.hold_misses + 1 if removed_hold.hold_misses else 1
+                )
                 if removed_hold.hold_misses >= self.HOLD_MISS_THRESHOLD:
                     removed_hold.record_status_history(Status.finished)
                     removed_hold.hold_misses = 0
@@ -601,7 +601,7 @@ class Motor(ABC):
 
         try:
             seconds = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return default
 
         return max(0.0, min(seconds, float(self.RATE_LIMIT_SLEEP_CAP)))

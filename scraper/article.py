@@ -12,8 +12,8 @@ MAX_HISTORY = 100
 @dataclass
 class ArticleHistory:
     datetime: str
-    title:    Optional[str] = None
-    price:    Optional[str] = None
+    title: Optional[str] = None
+    price: Optional[str] = None
 
     def __str__(self) -> str:
         return f"[{self.datetime}] - {self.title}  ${self.price}"
@@ -72,16 +72,16 @@ class StatusHistory:
 
 @dataclass
 class Article:
-    identifier:   str
-    title:        str
-    price:        float
-    url:          Optional[str]  = None
-    datetime:     str            = field(default_factory=lambda: str(datetime_lib.now()))
-    status:       Status         = Status.none
-    history:      List[ArticleHistory] = field(default_factory=list)
+    identifier: str
+    title: str
+    price: float
+    url: Optional[str] = None
+    datetime: str = field(default_factory=lambda: str(datetime_lib.now()))
+    status: Status = Status.none
+    history: List[ArticleHistory] = field(default_factory=list)
     status_history: List[StatusHistory] = field(default_factory=list)
-    hold_misses:  int            = 0
-    last_updated: Optional[str]  = None
+    hold_misses: int = 0
+    last_updated: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.history = self._load_history(self.history)
@@ -104,7 +104,7 @@ class Article:
 
     def _load_history(self, raw: list, fix: bool = False) -> List[ArticleHistory]:
         history: List[ArticleHistory] = []
-        for item in (raw or []):
+        for item in raw or []:
             ah = ArticleHistory.create(item)
             if ah:
                 history.append(ah)
@@ -120,7 +120,7 @@ class Article:
 
     def _load_status_history(self, raw: list) -> List[StatusHistory]:
         history: List[StatusHistory] = []
-        for item in (raw or []):
+        for item in raw or []:
             ah = StatusHistory.create(item)
             if ah:
                 history.append(ah)
@@ -132,7 +132,7 @@ class Article:
             return 0
         try:
             misses = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0
         return max(0, misses)
 
@@ -143,9 +143,7 @@ class Article:
         """
         keys = ("title", "price")
         changes = {
-            k: to_update[k]
-            for k in keys
-            if k in to_update and getattr(self, k) != to_update[k]
+            k: to_update[k] for k in keys if k in to_update and getattr(self, k) != to_update[k]
         }
 
         if not changes:
@@ -161,7 +159,11 @@ class Article:
         is_first = not self.history
         history_entry = {
             **old_values,
-            "datetime": original_datetime if is_first or previous_last_updated is None else previous_last_updated,
+            "datetime": (
+                original_datetime
+                if is_first or previous_last_updated is None
+                else previous_last_updated
+            ),
         }
         ah = ArticleHistory.create(history_entry)
         if ah:
@@ -183,10 +185,12 @@ class Article:
         if self.status_history and self.status_history[0].status == status:
             return False
 
-        ah = StatusHistory.create({
-            "datetime": str(datetime_lib.now()),
-            "status": status.value,
-        })
+        ah = StatusHistory.create(
+            {
+                "datetime": str(datetime_lib.now()),
+                "status": status.value,
+            }
+        )
         if not ah:
             return False
 
@@ -202,11 +206,11 @@ class Article:
         """
         d: Dict[str, Any] = {
             "identifier": self.identifier,
-            "title":      self.title,
-            "price":      self.price,
-            "url":        self.url,
-            "datetime":   str(self.datetime),
-            "status":     self.status.value,
+            "title": self.title,
+            "price": self.price,
+            "url": self.url,
+            "datetime": str(self.datetime),
+            "status": self.status.value,
         }
         if self.history:
             d["last_updated"] = self.last_updated

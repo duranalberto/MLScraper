@@ -38,6 +38,7 @@ _CONFIG_PATH = Path("config/telegram.yaml")
 # Credential loading
 # ---------------------------------------------------------------------------
 
+
 def _load_config() -> tuple[str, str]:
     """
     Read api_token and chat_id from config/telegram.yaml.
@@ -62,12 +63,11 @@ def _load_config() -> tuple[str, str]:
         return "", ""
 
     token = str(raw.get("api_token", "")).strip()
-    chat  = str(raw.get("chat_id",   "")).strip()
+    chat = str(raw.get("chat_id", "")).strip()
 
     if not token or not chat:
         logger.warning(
-            "'%s' is missing api_token or chat_id. "
-            "Telegram notifications are disabled.",
+            "'%s' is missing api_token or chat_id. " "Telegram notifications are disabled.",
             _CONFIG_PATH,
         )
         return "", ""
@@ -77,12 +77,13 @@ def _load_config() -> tuple[str, str]:
 
 _API_TOKEN, _CHAT_ID = _load_config()
 _ENABLED = bool(_API_TOKEN and _CHAT_ID)
-_API_URL  = f"https://api.telegram.org/bot{_API_TOKEN}/sendMessage" if _ENABLED else ""
+_API_URL = f"https://api.telegram.org/bot{_API_TOKEN}/sendMessage" if _ENABLED else ""
 
 
 # ---------------------------------------------------------------------------
 # Public async API
 # ---------------------------------------------------------------------------
+
 
 async def send_new_to_telegram(element: dict) -> None:
     """Send a new-listing notification.  No-op when credentials are missing."""
@@ -104,6 +105,7 @@ async def send_price_drop_to_telegram(element: dict) -> None:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 async def _send_async(message: str) -> None:
     """
@@ -134,10 +136,10 @@ def _send_sync(message: str) -> None:
 
 def _format_new_item(element: dict) -> str:
     search_term = element.get("search_term", "New item")
-    title       = element.get("title", "Untitled")
-    url         = element.get("url", "")
-    price       = element.get("price", 0)
-    dt          = element.get("datetime", "Unknown")
+    title = element.get("title", "Untitled")
+    url = element.get("url", "")
+    price = element.get("price", 0)
+    dt = element.get("datetime", "Unknown")
 
     return (
         f"🆕 <b>NEW LISTING</b>\n"
@@ -153,15 +155,15 @@ def _format_price_drop(element: dict) -> Optional[str]:
     if not element.get("percent_change"):
         return None
 
-    search_term    = element.get("search_term", "Item")
-    title          = element.get("title", "Untitled")
-    url            = element.get("url", "")
-    price          = element.get("price", 0)
+    search_term = element.get("search_term", "Item")
+    title = element.get("title", "Untitled")
+    url = element.get("url", "")
+    price = element.get("price", 0)
     percent_change = abs(element.get("percent_change", 0))
-    history        = element.get("history", [{}])
-    last_price     = history[0].get("price", 0) if history else 0
-    dt             = history[0].get("datetime", "Unknown") if history else "Unknown"
-    savings        = last_price - price
+    history = element.get("history", [{}])
+    last_price = history[0].get("price", 0) if history else 0
+    dt = history[0].get("datetime", "Unknown") if history else "Unknown"
+    savings = last_price - price
 
     return (
         f"🔥 <b>PRICE DROP ALERT!</b>\n"
