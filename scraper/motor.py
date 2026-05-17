@@ -11,14 +11,14 @@ from traceback import format_exc
 from typing import Any, Callable, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from aiohttp import ClientError, ClientSession, ClientTimeout
+from aiohttp import ClientSession
 import yaml
 
 from .article import Article
+from .fetchers import get_fetcher
 from .status import Status
 from .stream import Stream
 from utils.file_manager import read_json_file, write_in_file
-from utils.headers import get_random_header
 
 logger = logging.getLogger(__name__)
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "motors.yaml"
@@ -44,12 +44,17 @@ def _load_motor_config() -> dict[str, Any]:
 
 
 class Motor(ABC):
+    PROVIDER_KEY: str | None = None
     PAGE_DELAY_RANGE: Tuple[float, float] | None = None
     FRESH_SESSION_PER_PAGE: bool | None = None
     MAX_RATE_LIMIT_RETRIES: int | None = None
     RATE_LIMIT_SLEEP_CAP: int | None = None
     BLOCKED_BACKOFF_SECONDS: int | None = None
     CONCURRENCY_LIMIT: int | None = None
+    FETCH_STRATEGY: str | None = None
+    FETCH_TIMEOUT_SECONDS: int | None = None
+    BROWSER_WAIT_SELECTOR: str | None = None
+    BROWSER_BLOCK_SELECTORS: tuple[str, ...] | None = None
     HOLD_MISS_THRESHOLD: int = 3
 
     def __init__(
@@ -67,6 +72,7 @@ class Motor(ABC):
         self.finished     = Stream(Status.finished)
         self.debug        = debug
         self.blocked_until: float = 0.0
+        self.blocked_reason: str | None = None
         self._scrape_incomplete: bool = False
 
         self._apply_config()
@@ -95,6 +101,18 @@ class Motor(ABC):
         )
         self.CONCURRENCY_LIMIT = self._coerce_int(
             self._get_setting("CONCURRENCY_LIMIT", class_config)
+        )
+        self.FETCH_STRATEGY = self._coerce_fetch_strategy(
+            self._get_setting("FETCH_STRATEGY", class_config)
+        )
+        self.FETCH_TIMEOUT_SECONDS = self._coerce_int(
+            self._get_setting("FETCH_TIMEOUT_SECONDS", class_config)
+        )
+        self.BROWSER_WAIT_SELECTOR = self._coerce_optional_str(
+            self._get_setting("BROWSER_WAIT_SELECTOR", class_config)
+        )
+        self.BROWSER_BLOCK_SELECTORS = self._coerce_string_tuple(
+            self._get_setting("BROWSER_BLOCK_SELECTORS", class_config)
         )
 
     @staticmethod
@@ -157,64 +175,49 @@ class Motor(ABC):
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Expected an integer value, got {value!r}.") from exc
 
+    @staticmethod
+    def _coerce_fetch_strategy(value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"FETCH_STRATEGY must be a string, got {value!r}.")
+        strategy = value.strip().lower()
+        if strategy not in {"aiohttp", "browser"}:
+            raise ValueError(
+                f"FETCH_STRATEGY must be one of 'aiohttp' or 'browser', got {value!r}."
+            )
+        return strategy
+
+    @staticmethod
+    def _coerce_optional_str(value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f"Expected a string or null value, got {value!r}.")
+        value = value.strip()
+        return value or None
+
+    @staticmethod
+    def _coerce_string_tuple(value: Any) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            value = [value]
+        if isinstance(value, (list, tuple)):
+            result = tuple(str(item).strip() for item in value if str(item).strip())
+            return result
+        raise ValueError(f"Expected a string list value, got {value!r}.")
+
     async def _fetch(
         self,
         session: ClientSession,
         url: str,
         retries: int = 3,
     ) -> Optional[str]:
-        loop = asyncio.get_running_loop()
-        attempt = 0
-        rate_limit_hits = 0
-
-        while attempt < retries:
-            try:
-                async with session.get(
-                    url,
-                    headers=get_random_header(),
-                    timeout=ClientTimeout(connect=10, sock_read=30),
-                ) as resp:
-                    if resp.status == 200:
-                        return await resp.text()
-                    if resp.status in {429, 503}:
-                        wait = self._retry_after_delay(resp.headers.get("Retry-After"))
-                        rate_limit_hits += 1
-                        if self.debug:
-                            logger.warning(
-                                "HTTP %s for %s — backing off for %ss",
-                                resp.status,
-                                url,
-                                wait,
-                            )
-                        await asyncio.sleep(wait)
-                        if rate_limit_hits >= self.MAX_RATE_LIMIT_RETRIES:
-                            self.blocked_until = loop.time() + max(wait, float(self.BLOCKED_BACKOFF_SECONDS))
-                            if self.debug:
-                                logger.warning(
-                                    "Giving up on %s after %d rate-limit responses.",
-                                    url,
-                                    rate_limit_hits,
-                                )
-                            return None
-                        continue
-                    if self.debug:
-                        logger.warning("HTTP %s for %s", resp.status, url)
-                    if resp.status in {403, 404}:
-                        break   # Don't retry permanent failures
-            except (ClientError, asyncio.TimeoutError):
-                if self.debug:
-                    logger.warning(
-                        "Transient fetch error for %s (attempt %d/%d).",
-                        url,
-                        attempt + 1,
-                        retries,
-                    )
-
-            attempt += 1
-            if attempt < retries:
-                await asyncio.sleep(0.5 * (2 ** attempt))
-
-        return None
+        return await get_fetcher(self.FETCH_STRATEGY).fetch(
+            motor=self,
+            session=session,
+            url=url,
+            retries=retries,
+        )
 
     async def scrape(
         self,
@@ -234,6 +237,7 @@ class Motor(ABC):
                     self.blocked_until,
                 )
             return
+        self.blocked_reason = None
 
         try:
             if self.FRESH_SESSION_PER_PAGE:
@@ -302,6 +306,7 @@ class Motor(ABC):
         html = await self._fetch(session, current_url)
         if not html:
             self._scrape_incomplete = True
+            self.blocked_reason = self.blocked_reason or "fetch_failed"
             if self.debug:
                 logger.warning(
                     "Failed to fetch '%s' for '%s'",
@@ -315,6 +320,7 @@ class Motor(ABC):
             items, next_url = self.scrape_page(body)
         except Exception:
             self._scrape_incomplete = True
+            self.blocked_reason = "parse_error"
             logger.error("Error parsing %s:\n%s", current_url, format_exc())
             return None
 
@@ -332,7 +338,7 @@ class Motor(ABC):
             self._scrape_incomplete = True
             cooldown = self.BLOCKED_BACKOFF_SECONDS
             if cooldown > 0:
-                self.blocked_until = asyncio.get_running_loop().time() + cooldown
+                self.mark_blocked("empty_paginated_page", cooldown)
             logger.warning(
                 "Empty result page for '%s' at %s with a next page present; stopping pagination.",
                 self.search_term,
@@ -563,11 +569,24 @@ class Motor(ABC):
         logger.info("  Currently finished:%d", len(self.finished))
 
     @property
+    def provider_key(self) -> str:
+        return self.PROVIDER_KEY or type(self).__name__
+
+    @property
     def domain(self) -> str:
         host = urlparse(self.url).netloc.lower()
         if host.startswith("www."):
             host = host[4:]
         return host
+
+    def mark_blocked(self, reason: str, cooldown: float | int | None = None) -> None:
+        self.blocked_reason = reason
+        if cooldown and cooldown > 0:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            self.blocked_until = loop.time() + float(cooldown)
 
     async def _sleep_before_next_page(self) -> None:
         low, high = self.PAGE_DELAY_RANGE

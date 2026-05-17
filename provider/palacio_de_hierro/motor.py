@@ -12,6 +12,7 @@ _DEFAULT_PAGE_SIZE = 52
 
 
 class PalacioDeHierro(Motor):
+    PROVIDER_KEY = "ph"
     BASE_DOMAIN = "https://www.elpalaciodehierro.com"
 
     def __init__(self, search_term: str, url: str, *, storage_path: str):
