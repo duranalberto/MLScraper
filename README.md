@@ -25,6 +25,11 @@ The service listens on port `80` and exposes:
 GET /health
 ```
 
+Develop with the VS Code dev container by rebuilding and reopening the project
+in the container. The image installs runtime dependencies, developer tools, and
+Playwright Chromium during build. It also configures Zsh with Oh My Zsh,
+Powerlevel10k, `zsh-autosuggestions`, and `zsh-syntax-highlighting`.
+
 Run locally:
 
 ```bash

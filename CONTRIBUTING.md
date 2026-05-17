@@ -5,6 +5,11 @@ the existing provider/motor structure.
 
 ## Setup
 
+For VS Code dev container development, rebuild and reopen the repository in the
+container. The dev container image includes runtime dependencies, developer
+tools, Playwright Chromium, and a Zsh terminal configured with Oh My Zsh,
+Powerlevel10k, `zsh-autosuggestions`, and `zsh-syntax-highlighting`.
+
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
