@@ -13,18 +13,6 @@ Supported providers:
 
 ## Quick Start
 
-Run with Docker Compose:
-
-```bash
-docker compose up --build
-```
-
-The service listens on port `80` and exposes:
-
-```text
-GET /health
-```
-
 Develop with the VS Code dev container by rebuilding and reopening the project
 in the container. The image installs runtime dependencies, developer tools, and
 Playwright Chromium during build. It also configures Zsh with Oh My Zsh,
@@ -38,6 +26,12 @@ python -m playwright install --with-deps chromium
 python app.py
 ```
 
+The service listens on port `80` and exposes:
+
+```text
+GET /health
+```
+
 Run tests:
 
 ```bash
@@ -48,6 +42,7 @@ Optional developer checks:
 
 ```bash
 python -m pip install -r requirements-dev.txt
+pyright
 ruff check .
 black --check .
 pre-commit run --all-files
@@ -70,9 +65,8 @@ cp config/telegram.yaml.example config/telegram.yaml
 
 `config/telegram.yaml` is ignored by Git and must never be committed.
 
-By default, persisted product JSON is stored under `./data`. Docker Compose sets
-`DATA_PATH=/MLScraper/data` inside the container and mounts the local `./data`
-directory there.
+By default, persisted product JSON is stored under `./data`. Set `DATA_PATH` if
+you need to use a different storage directory.
 
 See [Configuration](docs/CONFIGURATION.md) for the full config guide.
 
@@ -92,10 +86,20 @@ More detail:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Data Model](docs/DATA_MODEL.md)
+- [Testing](docs/TESTING.md)
 - [Adding a Provider](docs/ADDING_PROVIDER.md)
 - [Operations](docs/OPERATIONS.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
+
+## Documentation Style
+
+Project docstrings use the Google-style convention documented in
+[Contributing](CONTRIBUTING.md#documentation-and-docstrings). Public modules,
+classes, provider contracts, parsers, fetchers, factories, persistence helpers,
+notifications, and orchestration code should document parameters, return values,
+intentional exceptions, side effects, and scraper-specific assumptions when
+those details are not obvious from the signature.
 
 ## Working With LLM Agents
 

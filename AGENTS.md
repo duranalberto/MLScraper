@@ -24,6 +24,14 @@ working in this repository.
 - Keep `scraper/` for scraper-owned job assembly and runtime orchestration.
 - Keep config names aligned with the current YAML files:
   `config/jobs.yaml`, `config/motors.yaml`, and `config/scrapper.yaml`.
+- Follow the Google-style docstring standard in
+  `CONTRIBUTING.md#documentation-and-docstrings`. Public modules, classes,
+  methods, provider contracts, parsers, fetchers, factories, persistence,
+  notifications, and orchestration code should document parameters, return
+  values, intentional exceptions, side effects, and scraper-specific assumptions
+  when those details are not obvious from the signature.
+- Do not add docstring lint enforcement until the existing public API has been
+  documented.
 - Run `python -m unittest discover -v` after behavior changes.
 - For docs-only changes, still verify links and command names against the repo.
 
@@ -31,7 +39,7 @@ working in this repository.
 
 ```bash
 python -m unittest discover -v
-docker compose up --build
+pyright
 ruff check .
 black --check .
 ```

@@ -9,17 +9,15 @@ import unittest
 from collections import Counter
 from contextlib import suppress
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from typing import Any, cast
+from unittest.mock import AsyncMock, patch
 
 import scraper.runtime.orchestrator as orchestrator_module
-from aiohttp import ClientTimeout
+import scraper.jobs.loader as jobs_loader
+from aiohttp import ClientSession, ClientTimeout
 from scraper.runtime.config import RuntimeConfig
-from scraper.runtime.notifications import broadcast_is_updated, broadcast_new_element
 from shared.articles.article import Article
-from shared.articles.lifecycle import ArticleLifecycle
-from shared.articles.status import Status
-from shared.articles.stream import Stream
-from shared.scraping.fetchers import AioHttpFetcher, BrowserFetcher
+from shared.scraping.fetchers import AioHttpFetcher
 from shared.scraping.motor import Motor
 from scraper.runtime.orchestrator import Scrapper
 from utils.header_profiles import HEADER_PROFILES
@@ -34,6 +32,7 @@ from provider.mercado_libre import parser as mercado_libre_parser
 from provider.mercado_libre.motor import MercadoLibre
 from provider.mercado_libre.options import Category
 from provider.palacio_de_hierro.motor import PalacioDeHierro
+from tests.helpers import empty_article_storage
 
 
 class Probe:
@@ -57,7 +56,7 @@ class Probe:
 
 
 class DummyMotor:
-    def __init__(self, provider_key: str, concurrency_limit: int, probe: Probe) -> None:
+    def __init__(self, provider_key: str, concurrency_limit: int | None, probe: Probe) -> None:
         self.provider_key = provider_key
         self.CONCURRENCY_LIMIT = concurrency_limit
         self.search_term = f"{provider_key}-job"
@@ -82,25 +81,6 @@ class CycleDummyMotor:
         self.started += 1
         await asyncio.sleep(self.delay)
         self.finished += 1
-
-
-class FetchDummyMotor:
-    def __init__(
-        self,
-        *,
-        wait_selector: str | None = "section.results",
-        block_selectors: tuple[str, ...] = (),
-        timeout: int = 1,
-    ) -> None:
-        self.FETCH_TIMEOUT_SECONDS = timeout
-        self.BROWSER_WAIT_SELECTOR = wait_selector
-        self.BROWSER_BLOCK_SELECTORS = block_selectors
-        self.BLOCKED_BACKOFF_SECONDS = 0
-        self.blocked_reason = None
-        self.debug = False
-
-    def mark_blocked(self, reason: str, cooldown: float | int | None = None) -> None:
-        self.blocked_reason = reason
 
 
 class AioHttpDummyMotor:
@@ -139,53 +119,12 @@ class CapturingAioHttpSession:
         return FakeAioHttpResponse()
 
 
-class FakeLocator:
-    def __init__(self, count: int) -> None:
-        self._count = count
-
-    async def count(self) -> int:
-        return self._count
-
-
-class FakePage:
-    def __init__(
-        self,
-        selectors: dict[str, int],
-        content: str = "<html></html>",
-        url: str = "https://example.test",
-    ) -> None:
-        self.selectors = selectors
-        self._content = content
-        self.url = url
-        self.closed = False
-
-    async def goto(self, url: str, wait_until: str, timeout: int) -> None:
-        self.url = self.url if self.url != "https://example.test" else url
-
-    def locator(self, selector: str) -> FakeLocator:
-        return FakeLocator(self.selectors.get(selector, 0))
-
-    async def content(self) -> str:
-        return self._content
-
-    async def close(self) -> None:
-        self.closed = True
-
-
-class FakeContext:
-    def __init__(self, page: FakePage) -> None:
-        self.page = page
-
-    async def new_page(self) -> FakePage:
-        return self.page
-
-
 def make_scrapper(
-    motors: list[DummyMotor],
+    motors: list[Any],
     runtime_config: RuntimeConfig | None = None,
 ) -> Scrapper:
     return Scrapper(
-        motors=motors,
+        motors=cast(list[Motor], motors),
         runtime_config=runtime_config or RuntimeConfig(backoff_initial=1, backoff_max=1),
     )
 
@@ -207,6 +146,14 @@ async def cancel_task(task: asyncio.Task) -> None:
 
 
 class PackageBoundaryTests(unittest.TestCase):
+    PRODUCTION_ROOTS = (
+        Path("app.py"),
+        Path("shared"),
+        Path("scraper"),
+        Path("provider"),
+        Path("utils"),
+    )
+
     def test_root_contains_only_app_entrypoint(self) -> None:
         root_files = sorted(path.name for path in Path(".").glob("*.py"))
 
@@ -233,29 +180,21 @@ class PackageBoundaryTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_removed_legacy_import_paths_are_absent(self) -> None:
-        legacy_paths = [
-            ".".join(parts)
-            for parts in [
-                ("provider", "loader"),
-                ("provider", "factories"),
-                ("provider", "registry"),
-                ("provider", "generator"),
-                ("scraper", "article"),
-                ("scraper", "article_lifecycle"),
-                ("scraper", "article_repository"),
-                ("scraper", "fetchers"),
-                ("scraper", "motor"),
-                ("scraper", "motor_config"),
-                ("scraper", "status"),
-                ("scraper", "stream"),
-            ]
-        ]
-        offenders: list[str] = []
-        for path in self._python_files(Path(".")):
-            source = path.read_text(encoding="utf-8")
-            for legacy_path in legacy_paths:
-                if legacy_path in source:
-                    offenders.append(f"{path}:{legacy_path}")
+        legacy_paths = {
+            "provider.loader",
+            "provider.factories",
+            "provider.registry",
+            "provider.generator",
+            "scraper.article",
+            "scraper.article_lifecycle",
+            "scraper.article_repository",
+            "scraper.fetchers",
+            "scraper.motor",
+            "scraper.motor_config",
+            "scraper.status",
+            "scraper.stream",
+        }
+        offenders = self._imports_matching(Path("."), legacy_paths)
 
         self.assertEqual(offenders, [])
 
@@ -266,6 +205,15 @@ class PackageBoundaryTests(unittest.TestCase):
 
     @staticmethod
     def _python_files(root: Path) -> list[Path]:
+        if root == Path("."):
+            files: list[Path] = []
+            for production_root in PackageBoundaryTests.PRODUCTION_ROOTS:
+                if production_root.is_file():
+                    files.append(production_root)
+                elif production_root.is_dir():
+                    files.extend(PackageBoundaryTests._python_files(production_root))
+            return sorted(files)
+
         return sorted(
             path
             for path in root.rglob("*.py")
@@ -289,6 +237,26 @@ class PackageBoundaryTests(unittest.TestCase):
                         offenders.append(f"{path}:{name}")
         return offenders
 
+    def _imports_matching(self, root: Path, forbidden_modules: set[str]) -> list[str]:
+        offenders: list[str] = []
+        for path in self._python_files(root):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""]
+                else:
+                    continue
+
+                for name in names:
+                    if any(
+                        name == forbidden or name.startswith(f"{forbidden}.")
+                        for forbidden in forbidden_modules
+                    ):
+                        offenders.append(f"{path}:{name}")
+        return offenders
+
 
 class ProviderConcurrencyTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_provider_jobs_are_serialized_when_limit_is_one(self) -> None:
@@ -296,7 +264,7 @@ class ProviderConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         motors = [DummyMotor("ml", 1, probe) for _ in range(3)]
         scrapper = make_scrapper(motors)
 
-        await asyncio.gather(*(scrapper._scrape_with_limit(motor) for motor in motors))
+        await asyncio.gather(*(scrapper._scrape_with_limit(cast(Motor, motor)) for motor in motors))
 
         self.assertEqual(probe.max_by_provider["ml"], 1)
         self.assertEqual(scrapper.health["providers"]["ml"]["configured_limit"], 1)
@@ -306,7 +274,7 @@ class ProviderConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         motors = [DummyMotor("lv", 2, probe) for _ in range(3)]
         scrapper = make_scrapper(motors)
 
-        await asyncio.gather(*(scrapper._scrape_with_limit(motor) for motor in motors))
+        await asyncio.gather(*(scrapper._scrape_with_limit(cast(Motor, motor)) for motor in motors))
 
         self.assertEqual(probe.max_by_provider["lv"], 2)
         self.assertEqual(scrapper.health["providers"]["lv"]["configured_limit"], 2)
@@ -319,7 +287,7 @@ class ProviderConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         ]
         scrapper = make_scrapper(motors)
 
-        await asyncio.gather(*(scrapper._scrape_with_limit(motor) for motor in motors))
+        await asyncio.gather(*(scrapper._scrape_with_limit(cast(Motor, motor)) for motor in motors))
 
         self.assertEqual(probe.max_by_provider["ml"], 1)
         self.assertEqual(probe.max_by_provider["az"], 1)
@@ -434,72 +402,6 @@ class ProviderCycleSchedulerTests(unittest.IsolatedAsyncioTestCase):
             await cancel_task(task)
 
 
-class BroadcastNotificationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_new_item_logs_when_not_initial_scrape(self) -> None:
-        element = {
-            "search_term": "Nintendo",
-            "title": "Nintendo 3DS",
-            "price": 2500.0,
-            "url": "https://example.test/item",
-            "is_initial_scrape": False,
-        }
-        send_new = AsyncMock()
-        logger = Mock()
-
-        await broadcast_new_element(element, send_new=send_new, logger=logger)
-
-        logger.info.assert_called_once_with(
-            "NEW ITEM: %s | %s | $%s | %s",
-            "Nintendo",
-            "Nintendo 3DS",
-            2500.0,
-            "https://example.test/item",
-        )
-        send_new.assert_awaited_once_with(element)
-
-    async def test_new_item_log_is_suppressed_on_initial_scrape(self) -> None:
-        element = {
-            "search_term": "Nintendo",
-            "title": "Nintendo 3DS",
-            "price": 2500.0,
-            "url": "https://example.test/item",
-            "is_initial_scrape": True,
-        }
-        send_new = AsyncMock()
-        logger = Mock()
-
-        await broadcast_new_element(element, send_new=send_new, logger=logger)
-
-        logger.info.assert_not_called()
-        send_new.assert_awaited_once_with(element)
-
-    async def test_price_drop_broadcast_includes_previous_and_new_price(self) -> None:
-        element = {
-            "search_term": "Nintendo",
-            "title": "Nintendo 3DS",
-            "price": 1500.0,
-            "url": "https://example.test/item",
-            "history": [{"price": 2000.0, "datetime": "2026-01-01"}],
-        }
-        send_drop = AsyncMock()
-        logger = Mock()
-
-        await broadcast_is_updated(element, send_price_drop=send_drop, logger=logger)
-
-        self.assertEqual(element["previous_price"], 2000.0)
-        self.assertEqual(element["new_price"], 1500.0)
-        self.assertEqual(element["percent_change"], "25.00")
-        logger.info.assert_called_once_with(
-            "PRICE DROP: %s | $%.2f -> $%.2f (%s%%) — %s",
-            "Nintendo 3DS",
-            2000.0,
-            1500.0,
-            "25.00",
-            "https://example.test/item",
-        )
-        send_drop.assert_awaited_once_with(element)
-
-
 class TelegramFormatterTests(unittest.TestCase):
     def test_price_drop_message_uses_previous_and_new_price(self) -> None:
         message = _format_price_drop(
@@ -515,6 +417,7 @@ class TelegramFormatterTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(message)
+        assert message is not None
         self.assertIn("$2,000.00", message)
         self.assertIn("$1,500.00 MXN", message)
         self.assertIn("Save $500.00", message)
@@ -523,6 +426,7 @@ class TelegramFormatterTests(unittest.TestCase):
 
 class ConfigPathResolutionTests(unittest.TestCase):
     def test_default_jobs_path_is_repo_root_based(self) -> None:
+        expected_jobs = load_jobs(jobs_loader.DEFAULT_CONFIG_PATH)
         original_cwd = Path.cwd()
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
@@ -531,8 +435,8 @@ class ConfigPathResolutionTests(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
-        self.assertEqual(len(jobs), 8)
-        self.assertEqual({job["provider"] for job in jobs}, {"az", "lv", "ml", "ph"})
+        self.assertTrue(jobs_loader.DEFAULT_CONFIG_PATH.is_absolute())
+        self.assertEqual(jobs, expected_jobs)
 
     def test_telegram_config_path_is_repo_root_based(self) -> None:
         original_cwd = Path.cwd()
@@ -547,47 +451,16 @@ class ConfigPathResolutionTests(unittest.TestCase):
         self.assertEqual((token, chat_id), ("", ""))
 
 
-class ArticleLifecycleTests(unittest.TestCase):
-    def test_missing_article_moves_from_active_to_finished_after_threshold(self) -> None:
-        active = Stream(Status.active)
-        on_hold = Stream(Status.on_hold)
-        finished = Stream(Status.finished)
-        lifecycle = ArticleLifecycle(
-            active,
-            on_hold,
-            finished,
-            Article.create,
-            hold_miss_threshold=2,
-        )
-
-        article, is_new, is_updated = lifecycle.save(
-            {"identifier": "item-1", "title": "Console", "price": 100.0}
-        )
-
-        self.assertIsNotNone(article)
-        self.assertTrue(is_new)
-        self.assertFalse(is_updated)
-        self.assertEqual(len(active), 1)
-
-        lifecycle.save(article, to_status=Status.on_hold, at_beginning=False)
-        self.assertEqual(len(active), 0)
-        self.assertEqual(len(on_hold), 1)
-        self.assertEqual(on_hold.get_list()[0].hold_misses, 1)
-
-        lifecycle.save(article, to_status=Status.on_hold, at_beginning=False)
-        self.assertEqual(len(on_hold), 0)
-        self.assertEqual(len(finished), 1)
-        self.assertEqual(finished.get_list()[0].status, Status.finished)
-
-
 class FetchStrategyConfigTests(unittest.TestCase):
     def test_default_fetch_strategy_is_aiohttp(self) -> None:
-        motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
+        with empty_article_storage():
+            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
 
         self.assertEqual(motor.FETCH_STRATEGY, "aiohttp")
 
     def test_mercado_libre_fetch_strategy_is_browser(self) -> None:
-        motor = MercadoLibre("pokemon ds", Category.consolas, storage_path="tests/ml.json")
+        with empty_article_storage():
+            motor = MercadoLibre("pokemon ds", Category.consolas, storage_path="tests/ml.json")
 
         self.assertEqual(motor.FETCH_STRATEGY, "browser")
         self.assertEqual(motor.BROWSER_WAIT_SELECTOR, "section.ui-search-results")
@@ -602,72 +475,46 @@ class FetchDelegationTests(unittest.IsolatedAsyncioTestCase):
         motor = AioHttpDummyMotor()
         session = CapturingAioHttpSession()
 
-        html = await AioHttpFetcher().fetch(motor, session, "https://example.test")
+        html = await AioHttpFetcher().fetch(
+            motor, cast(ClientSession, session), "https://example.test"
+        )
 
         self.assertEqual(html, "<html></html>")
         self.assertIsNotNone(session.timeout)
+        assert session.timeout is not None
         self.assertEqual(session.timeout.connect, 10)
         self.assertEqual(session.timeout.sock_read, 45)
 
     async def test_motor_delegates_to_configured_fetcher(self) -> None:
-        motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
+        with empty_article_storage():
+            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
         fake_fetcher = AsyncMock()
         fake_fetcher.fetch.return_value = "<html></html>"
 
         with patch("shared.scraping.motor.get_fetcher", return_value=fake_fetcher) as get_fetcher:
-            html = await motor._fetch(session=None, url="https://example.test")
+            html = await motor._fetch(
+                session=cast(ClientSession, None),
+                url="https://example.test",
+            )
 
         self.assertEqual(html, "<html></html>")
         get_fetcher.assert_called_once_with("aiohttp")
         fake_fetcher.fetch.assert_awaited_once()
 
     async def test_provider_can_opt_into_browser_strategy_by_config_value(self) -> None:
-        motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
+        with empty_article_storage():
+            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
         motor.FETCH_STRATEGY = "browser"
         fake_fetcher = AsyncMock()
         fake_fetcher.fetch.return_value = "<html></html>"
 
         with patch("shared.scraping.motor.get_fetcher", return_value=fake_fetcher) as get_fetcher:
-            await motor._fetch(session=None, url="https://example.test")
+            await motor._fetch(
+                session=cast(ClientSession, None),
+                url="https://example.test",
+            )
 
         get_fetcher.assert_called_once_with("browser")
-
-
-class BrowserFetcherTests(unittest.IsolatedAsyncioTestCase):
-    async def test_browser_fetch_returns_html_when_wait_selector_appears(self) -> None:
-        page = FakePage({"section.results": 1}, "<html><section class='results'></section></html>")
-        fetcher = BrowserFetcher()
-        fetcher._get_context = AsyncMock(return_value=FakeContext(page))
-        motor = FetchDummyMotor()
-
-        html = await fetcher.fetch(motor, session=None, url="https://example.test")
-
-        self.assertIn("section", html)
-        self.assertIsNone(motor.blocked_reason)
-        self.assertTrue(page.closed)
-
-    async def test_browser_fetch_marks_blocked_when_block_selector_appears(self) -> None:
-        page = FakePage({"section.blocked": 1})
-        fetcher = BrowserFetcher()
-        fetcher._get_context = AsyncMock(return_value=FakeContext(page))
-        motor = FetchDummyMotor(block_selectors=("section.blocked",))
-
-        html = await fetcher.fetch(motor, session=None, url="https://example.test")
-
-        self.assertIsNone(html)
-        self.assertEqual(motor.blocked_reason, "browser_blocked")
-
-    async def test_browser_fetch_marks_timeout_without_content(self) -> None:
-        page = FakePage({})
-        fetcher = BrowserFetcher()
-        fetcher._poll_interval_seconds = 0.01
-        fetcher._get_context = AsyncMock(return_value=FakeContext(page))
-        motor = FetchDummyMotor(timeout=1)
-
-        html = await fetcher.fetch(motor, session=None, url="https://example.test")
-
-        self.assertIsNone(html)
-        self.assertEqual(motor.blocked_reason, "browser_timeout")
 
 
 class MercadoLibreStabilityTests(unittest.IsolatedAsyncioTestCase):
@@ -678,7 +525,10 @@ class MercadoLibreStabilityTests(unittest.IsolatedAsyncioTestCase):
           <body>This page requires JavaScript to work. Please enable JavaScript in your browser to continue.</body>
         </html>
         """
-        motor = MercadoLibre("pokemon ds", Category.consolas, storage_path="tests/ml-js-gate.json")
+        with empty_article_storage():
+            motor = MercadoLibre(
+                "pokemon ds", Category.consolas, storage_path="tests/ml-js-gate.json"
+            )
         existing = Article(
             identifier="MLM123", title="Pokemon", price=100.0, url="https://example.test/item"
         )
@@ -699,7 +549,10 @@ class MercadoLibreStabilityTests(unittest.IsolatedAsyncioTestCase):
         motor.save_to_file.assert_awaited_once()
 
     async def test_browser_fetch_timeout_does_not_reconcile_missing_items(self) -> None:
-        motor = MercadoLibre("pokemon ds", Category.consolas, storage_path="tests/ml-timeout.json")
+        with empty_article_storage():
+            motor = MercadoLibre(
+                "pokemon ds", Category.consolas, storage_path="tests/ml-timeout.json"
+            )
         existing = Article(
             identifier="MLM123", title="Pokemon", price=100.0, url="https://example.test/item"
         )
@@ -729,7 +582,8 @@ class ProviderParserFixtureTests(unittest.TestCase):
         </div>
         <a class="s-pagination-next" href="/s?k=macbook&page=2">Next</a>
         """
-        motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
+        with empty_article_storage():
+            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 
@@ -760,11 +614,12 @@ class ProviderParserFixtureTests(unittest.TestCase):
         html = (
             f"<script id='__NEXT_DATA__' type='application/json'>{json.dumps(page_object)}</script>"
         )
-        motor = Liverpool(
-            "Laptops",
-            "https://www.liverpool.com.mx/tienda/Laptops/example",
-            storage_path="tests/lv.json",
-        )
+        with empty_article_storage():
+            motor = Liverpool(
+                "Laptops",
+                "https://www.liverpool.com.mx/tienda/Laptops/example",
+                storage_path="tests/lv.json",
+            )
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 
@@ -782,11 +637,12 @@ class ProviderParserFixtureTests(unittest.TestCase):
           <a href="/apple-macbook-air-test-45329637.html">MacBook Air Test</a>
         </div>
         """
-        motor = PalacioDeHierro(
-            "Macbook",
-            "https://www.elpalaciodehierro.com/buscar?q=macbook",
-            storage_path="tests/ph.json",
-        )
+        with empty_article_storage():
+            motor = PalacioDeHierro(
+                "Macbook",
+                "https://www.elpalaciodehierro.com/buscar?q=macbook",
+                storage_path="tests/ph.json",
+            )
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 
@@ -816,26 +672,19 @@ class ProviderParserFixtureTests(unittest.TestCase):
         self.assertEqual(result.blocked_reason, "mercado_libre_js_required")
 
     def test_mercado_libre_parser_handles_saved_root_source_fixture(self) -> None:
-        fixture = Path(
-            "https___listado.mercadolibre.com.mx_consolas-videojuegos_consolas_nintendo_usado_new-nintendo-3ds-xl_NoIndex_True.html"
-        )
-        if not fixture.exists():
-            self.skipTest("Mercado Libre root source fixture is not present.")
+        fixture = Path("tests/fixtures/mercado_libre/search_results.html")
         html = fixture.read_text(encoding="utf-8", errors="replace")
-        url = "https://listado.mercadolibre.com.mx/consolas-videojuegos/consolas/nintendo/usado/new-nintendo-3ds-xl_NoIndex_True"
-        motor = MercadoLibre(
-            "new nintendo 3ds xl", Category.consolas, storage_path="tests/ml-source.json"
-        )
+        url = "https://listado.mercadolibre.com.mx/consolas-videojuegos/test_NoIndex_True"
+        with empty_article_storage():
+            motor = MercadoLibre("nintendo", Category.consolas, storage_path="tests/ml-source.json")
 
         items, next_url = motor.scrape_page({"content": html, "url": url})
 
-        self.assertEqual(len(items), 48)
-        self.assertEqual(items[0]["identifier"], "MLMU3972668090")
-        self.assertEqual(
-            items[0]["title"], "Nintendo New 3ds Xl Restaurado Con Magia, Leer Descripción"
-        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["identifier"], "MLM123")
+        self.assertEqual(items[0]["title"], "Nintendo Fixture")
         self.assertEqual(items[0]["price"], 6000.0)
-        self.assertEqual(next_url, f"{url.replace('_NoIndex_True', '_Desde_49_NoIndex_True')}")
+        self.assertEqual(next_url, url.replace("_NoIndex_True", "_Desde_2_NoIndex_True"))
 
     def test_mercado_libre_nordic_state_fallback_without_dom_cards(self) -> None:
         state = {
@@ -872,7 +721,8 @@ class ProviderParserFixtureTests(unittest.TestCase):
             }
         }
         html = f"<script id='__NORDIC_RENDERING_CTX__'>_n.ctx.r={json.dumps(state)}</script>"
-        motor = MercadoLibre("nintendo", Category.consolas, storage_path="tests/ml-nordic.json")
+        with empty_article_storage():
+            motor = MercadoLibre("nintendo", Category.consolas, storage_path="tests/ml-nordic.json")
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 

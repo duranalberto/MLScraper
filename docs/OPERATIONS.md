@@ -1,21 +1,10 @@
 # Operations
 
-## Docker Compose
+## Dev Container
 
-Build and run:
-
-```bash
-docker compose up --build
-```
-
-The app listens on host port `80` and mounts local `./data` to
-`/MLScraper/data` inside the container.
-
-Stop the service:
-
-```bash
-docker compose down
-```
+For VS Code dev container development, rebuild and reopen the repository in the
+container. The dev container image installs runtime dependencies, developer
+tools, Playwright Chromium, and the configured shell environment.
 
 ## Local Run
 

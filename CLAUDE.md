@@ -31,7 +31,7 @@ working in this repository.
 
 ```bash
 python -m unittest discover -v
-docker compose up --build
+pyright
 ruff check .
 black --check .
 ```

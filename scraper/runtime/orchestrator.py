@@ -38,7 +38,7 @@ class Scrapper:
     ) -> None:
         self.runtime_config = runtime_config or load_runtime_config()
         self.notifier = notifier or TelegramNotifier(logger)
-        self.sleep_time = 400
+        self.sleep_time: float = 400
 
         self.motors: list[Motor] = get_motors() if motors is None else motors
         self._provider_semaphores: dict[str, asyncio.Semaphore] = {}

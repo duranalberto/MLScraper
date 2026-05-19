@@ -75,16 +75,8 @@ disabled without crashing the service.
 ## Data Path
 
 `utils/file_manager.py` reads `DATA_PATH` from the environment. If it is not set,
-the app uses `./data`.
-
-Docker Compose sets:
-
-```text
-DATA_PATH=/MLScraper/data
-```
-
-and mounts local `./data` into the container. Storage paths must stay relative
-to `DATA_PATH`.
+the app uses `./data`. Set `DATA_PATH` to point runtime JSON storage at another
+directory. Storage paths must stay relative to `DATA_PATH`.
 
 The historical tracked archive `data/data.zip` is left untouched by normal
 config/helper maintenance. Remove it from tracking only as part of an explicit

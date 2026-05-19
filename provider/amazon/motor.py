@@ -59,7 +59,8 @@ class Amazon(Motor):
                 continue
 
         next_tag = soup.select_one("a.s-pagination-next, span.s-pagination-next a")
-        if next_tag and next_tag.get("href"):
-            next_url = urllib.parse.urljoin(self.DOMAIN, next_tag["href"])
+        href = next_tag.get("href") if next_tag else None
+        if isinstance(href, str) and href:
+            next_url = urllib.parse.urljoin(self.DOMAIN, href)
 
         return items, next_url

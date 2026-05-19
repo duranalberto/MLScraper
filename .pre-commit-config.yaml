@@ -10,6 +10,16 @@ repos:
       - id: black
         args: ["--check"]
 
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: pyright
+        language: system
+        always_run: true
+        pass_filenames: false
+        types_or: [python, pyi]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

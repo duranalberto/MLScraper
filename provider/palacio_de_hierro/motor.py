@@ -39,19 +39,21 @@ class PalacioDeHierro(Motor):
         items: List[dict] = []
         for tile in soup.select("div[data-cnstrc-item-section='Products']"):
             identifier = tile.get("data-pid") or tile.get("data-cnstrc-item-id", "")
-            title = tile.get("data-cnstrc-item-name", "").strip()
+            raw_title = tile.get("data-cnstrc-item-name", "")
+            title = raw_title.strip() if isinstance(raw_title, str) else ""
             raw_price = tile.get("data-cnstrc-item-price", "0")
 
             if not identifier or not title:
                 continue
 
             try:
-                price = float(raw_price)
+                price = float(raw_price) if isinstance(raw_price, str) else 0.0
             except ValueError:
                 price = 0.0
 
             link = tile.select_one("a[href]")
-            url = link["href"] if link else ""
+            href = link.get("href") if link else None
+            url = href if isinstance(href, str) else ""
             if url.startswith("/"):
                 url = f"{self.BASE_DOMAIN}{url}"
 
@@ -93,12 +95,11 @@ class PalacioDeHierro(Motor):
     def _page_size(self, soup: BeautifulSoup) -> int:
         section = soup.select_one('section[data-component="search/ConstructorSearch"]')
         if section and section.has_attr("data-component-options"):
+            options = section.get("data-component-options")
+            if not isinstance(options, str):
+                return _DEFAULT_PAGE_SIZE
             try:
-                return int(
-                    json.loads(section["data-component-options"]).get(
-                        "pageSize", _DEFAULT_PAGE_SIZE
-                    )
-                )
+                return int(json.loads(options).get("pageSize", _DEFAULT_PAGE_SIZE))
             except json.JSONDecodeError, ValueError:
                 pass
         return _DEFAULT_PAGE_SIZE
@@ -106,8 +107,11 @@ class PalacioDeHierro(Motor):
     def _total(self, soup: BeautifulSoup) -> int:
         grid = soup.select_one("[data-cnstrc-num-results]")
         if grid:
+            raw_total = grid.get("data-cnstrc-num-results")
+            if not isinstance(raw_total, str):
+                return 0
             try:
-                return int(grid["data-cnstrc-num-results"])
-            except ValueError, KeyError:
+                return int(raw_total)
+            except ValueError:
                 pass
         return 0

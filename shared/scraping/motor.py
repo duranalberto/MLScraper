@@ -127,12 +127,18 @@ class Motor(ABC):
         url: str,
         retries: int = 3,
     ) -> Optional[str]:
-        return await get_fetcher(self.FETCH_STRATEGY).fetch(
+        return await get_fetcher(self.fetch_strategy).fetch(
             motor=self,
             session=session,
             url=url,
             retries=retries,
         )
+
+    @property
+    def fetch_strategy(self) -> str:
+        if self.FETCH_STRATEGY is None:
+            raise RuntimeError("FETCH_STRATEGY must be configured before fetching.")
+        return self.FETCH_STRATEGY
 
     async def scrape(
         self,
@@ -256,7 +262,7 @@ class Motor(ABC):
         if not items and next_url:
             self._scrape_incomplete = True
             cooldown = self.BLOCKED_BACKOFF_SECONDS
-            if cooldown > 0:
+            if cooldown is not None and cooldown > 0:
                 self.mark_blocked("empty_paginated_page", cooldown)
             logger.warning(
                 "Empty result page for '%s' at %s with a next page present; stopping pagination.",
@@ -268,7 +274,7 @@ class Motor(ABC):
         for item in items:
             article, is_new, is_updated = self.save(item)
 
-            if self.is_article(article):
+            if article is not None:
                 results.append(article)
 
                 if caller and (is_new or is_updated):
@@ -362,7 +368,7 @@ class Motor(ABC):
             self.blocked_until = loop.time() + float(cooldown)
 
     async def _sleep_before_next_page(self) -> None:
-        low, high = self.PAGE_DELAY_RANGE
+        low, high = self.page_delay_range
         if high <= 0:
             return
         await asyncio.sleep(random.uniform(low, high))
@@ -377,7 +383,19 @@ class Motor(ABC):
         except TypeError, ValueError:
             return default
 
-        return max(0.0, min(seconds, float(self.RATE_LIMIT_SLEEP_CAP)))
+        return max(0.0, min(seconds, float(self.rate_limit_sleep_cap)))
+
+    @property
+    def page_delay_range(self) -> Tuple[float, float]:
+        if self.PAGE_DELAY_RANGE is None:
+            raise RuntimeError("PAGE_DELAY_RANGE must be configured before pagination sleeps.")
+        return self.PAGE_DELAY_RANGE
+
+    @property
+    def rate_limit_sleep_cap(self) -> int:
+        if self.RATE_LIMIT_SLEEP_CAP is None:
+            raise RuntimeError("RATE_LIMIT_SLEEP_CAP must be configured before retry backoff.")
+        return self.RATE_LIMIT_SLEEP_CAP
 
     def _reconcile_missing(self, results: List[Article]) -> None:
         missing_from_active = self.active - results

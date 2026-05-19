@@ -4,6 +4,11 @@
     "dockerfile": "Dockerfile",
     "context": ".."
   },
+  "remoteEnv": {
+    "EDITOR": "code --wait",
+    "VISUAL": "code --wait"
+  },
+  "postCreateCommand": "git config --global core.editor 'code --wait'",
   "customizations": {
     "vscode": {
       "settings": {

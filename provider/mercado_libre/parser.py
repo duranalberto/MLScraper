@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse, urlunparse
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from .urls import get_identifier
 
@@ -63,7 +63,7 @@ def parse_dom_results(soup: BeautifulSoup, current_url: str) -> tuple[list[dict]
     return items, next_url
 
 
-def parse_dom_item(item: BeautifulSoup) -> dict | None:
+def parse_dom_item(item: Tag) -> dict | None:
     link_tag = item.select_one(
         "a.poly-component__title[href], "
         "a.ui-search-item__group__element[href], "
@@ -74,7 +74,10 @@ def parse_dom_item(item: BeautifulSoup) -> dict | None:
     if not link_tag:
         return None
 
-    raw_url = link_tag.get("href", "").strip()
+    href = link_tag.get("href")
+    if not isinstance(href, str):
+        return None
+    raw_url = href.strip()
     if not raw_url:
         return None
 
@@ -86,7 +89,7 @@ def parse_dom_item(item: BeautifulSoup) -> dict | None:
     }
 
 
-def _dom_price(item: BeautifulSoup) -> float:
+def _dom_price(item: Tag) -> float:
     price_span = item.select_one(
         ".poly-price__current .andes-money-amount__fraction, "
         ".ui-search-price__second-line .andes-money-amount__fraction, "
@@ -187,7 +190,7 @@ def nordic_url(metadata: dict) -> str:
 def get_page_size(soup: BeautifulSoup, raw_item_count: int) -> int:
     try:
         script = soup.find("script", id="__NEXT_DATA__")
-        if script:
+        if script and script.string:
             data = json.loads(script.string)
             return data["props"]["pageProps"]["initialState"]["melidata_track"]["event_data"][
                 "limit"
