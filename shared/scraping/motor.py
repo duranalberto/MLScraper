@@ -161,6 +161,12 @@ class Motor(ABC):
         self.blocked_reason = None
 
         try:
+            if caller and self.is_first_run and not silent:
+                logger.info(
+                    "%-35s | first run: Telegram notifications will be skipped",
+                    self.search_term,
+                )
+
             if self.FRESH_SESSION_PER_PAGE:
                 while current_url:
                     async with ClientSession() as session:

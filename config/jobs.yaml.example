@@ -12,10 +12,31 @@ jobs:
     search_term: macbook
     seller: amazon_mx
 
-  # Liverpool requires an explicit URL.
+  # Liverpool global searches always filter to Liverpool as seller.
   - provider: lv
-    search_term: Laptops
-    url: "https://www.liverpool.com.mx/tienda/Laptops/example"
+    search_term: Ventilador Liverpool
+    query: ventilador
+
+  # Liverpool page jobs resolve seller-filtered URLs from documented metadata.
+  - provider: lv
+    search_term: Hornos eléctricos
+    page: hornos_electricos
+
+  # Page + query keeps both the page and Liverpool seller refinements.
+  - provider: lv
+    search_term: Hornos eléctricos Black
+    page: Hornos eléctricos
+    query: black
+
+  # Legacy `category` is accepted as an alias for `page`.
+  - provider: lv
+    search_term: Juegos Nintendo
+    category: juegos_nintendo
+
+  # Explicit Liverpool URLs are the only bypass. They are used unchanged.
+  - provider: lv
+    search_term: Laptops custom filters
+    url: "https://www.liverpool.com.mx/tienda/laptops/N-..."
 
   # Palacio de Hierro requires an explicit URL.
   - provider: ph

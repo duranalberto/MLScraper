@@ -58,13 +58,32 @@ jobs:
   #   search_term: game cube juegos
 
   # ── Liverpool ─────────────────────────────────────────────────────────────
+  # Generated Liverpool jobs always filter to Liverpool as seller.
+  #
+  # Global seller-filtered search:
   - provider: lv
-    search_term: Laptops
-    url: "https://www.liverpool.com.mx/tienda/Laptops/N-Z6GQrU4fZmxjTFXt9XTtjADb51HPoq41uykVTx%2F8p7q4Lv5kmJ%2FB7n9SHDZAiZOr"
+    search_term: Ventilador Liverpool
+    query: ventilador
+  #
+  # Page-only seller-filtered URL resolved from the documented catalogue:
+  - provider: lv
+    search_term: Hornos eléctricos
+    page: hornos_electricos
+  #
+  # Page + query keeps both the Liverpool seller and page refinements:
+  - provider: lv
+    search_term: Hornos eléctricos Black
+    page: Hornos eléctricos
+    query: breville
 
   - provider: lv
-    search_term: Juegos Nintendo
-    url: "https://www.liverpool.com.mx/tienda/Juegos/N-Z6GQrU4fZmxjTFXt9XTtjEMtiDHLusAuxLK0y30fWRU5PhnhiYjJElHuz9EseRgf"
+    search_term: Apple
+    page: Apple
+
+  # Legacy `category` is accepted as an alias for `page`:
+  - provider: lv
+    search_term: Juegos Nintendo catálogo
+    category: juegos_nintendo
 
   # ── Palacio de Hierro ──────────────────────────────────────────────────────
   - provider: ph

@@ -30,14 +30,25 @@ async def broadcast_new_element(
     send_new: Callable[[dict], Awaitable[None]],
     logger: logging.Logger,
 ) -> None:
-    if not element.get("is_initial_scrape", False):
-        logger.info(
-            "NEW ITEM: %s | %s | $%s | %s",
-            element.get("search_term", "New item"),
-            element.get("title", "Untitled"),
-            element.get("price", "unknown"),
-            element.get("url", ""),
-        )
+    """Send new-item notifications after the initial scrape baseline exists.
+
+    Args:
+        element: Serialized article payload enriched with motor context. When
+            ``is_initial_scrape`` is true, the item belongs to a newly created
+            job's first successful scrape and is intentionally silenced.
+        send_new: Async callback that dispatches the new-item notification.
+        logger: Logger used for notification routing diagnostics.
+    """
+    if element.get("is_initial_scrape", False):
+        return
+
+    logger.info(
+        "NEW ITEM: %s | %s | $%s | %s",
+        element.get("search_term", "New item"),
+        element.get("title", "Untitled"),
+        element.get("price", "unknown"),
+        element.get("url", ""),
+    )
     await send_new(element)
 
 

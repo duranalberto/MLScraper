@@ -4,7 +4,8 @@ scraper/jobs/loader.py
 YAML Job Catalogue Loader
 ─────────────────────────
 Loads scraping job entries from a YAML file and coerces provider-specific
-string values (category names, seller names) into their proper enum types.
+string values (category, seller, and Liverpool page names) into their proper
+enum types.
 
 Design decisions
 ────────────────
@@ -29,9 +30,9 @@ Edge cases handled
 • `jobs` key missing or not a list         → ValueError
 • Entry is not a dict                      → entry skipped with a warning
 • Entry missing required `provider` key   → entry skipped with a warning
-• Unknown category / seller string        → entry skipped with a warning
+• Unknown provider-specific enum string   → entry skipped with a warning
 • `search_term` is missing or blank        → entry skipped with a warning
-• `url` required for lv/ph but absent     → entry skipped with a warning
+• `url` required for ph but absent        → entry skipped with a warning
 """
 
 from __future__ import annotations
@@ -42,25 +43,28 @@ from typing import Any
 
 import yaml
 
-from provider.amazon.options import Seller
-from provider.mercado_libre.options import Category
+from provider.amazon.options import Seller as AmazonSeller
+from provider.liverpool.options import Page as LiverpoolPage
+from provider.liverpool.options import resolve_page
+from provider.mercado_libre.options import Category as MercadoLibreCategory
 
 logger = logging.getLogger(__name__)
 
-_URL_REQUIRED_PROVIDERS = {"lv", "ph"}
+_URL_REQUIRED_PROVIDERS = {"ph"}
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "jobs.yaml"
 
 
-def _coerce_category(raw: str, entry: dict) -> Category | None:
-    """Convert a category string to a Category enum member, or return None on error."""
+def _coerce_enum(raw: str, entry: dict, enum_type, field_name: str):
+    """Convert a YAML string to a provider enum member, or return None on error."""
     try:
-        return Category[raw]
+        return enum_type[raw]
     except KeyError:
-        valid = [m.name for m in Category]
+        valid = [m.name for m in enum_type]
         logger.warning(
-            "Unknown category %r in entry %r. Valid values: %s",
+            "Unknown %s %r in entry %r. Valid values: %s",
+            field_name,
             raw,
             entry,
             valid,
@@ -68,19 +72,68 @@ def _coerce_category(raw: str, entry: dict) -> Category | None:
         return None
 
 
-def _coerce_seller(raw: str, entry: dict) -> Seller | None:
-    """Convert a seller string to a Seller enum member, or return None on error."""
+def _coerce_liverpool_page(raw: str, entry: dict, field_name: str) -> LiverpoolPage | None:
+    """Convert a Liverpool page string to a Page enum member, or return None."""
     try:
-        return Seller[raw]
-    except KeyError:
-        valid = [m.name for m in Seller]
+        return resolve_page(raw)
+    except ValueError as exc:
         logger.warning(
-            "Unknown seller %r in entry %r. Valid values: %s",
+            "Unknown %s %r in entry %r. %s",
+            field_name,
             raw,
             entry,
-            valid,
+            exc,
         )
         return None
+
+
+def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
+    """Coerce provider-owned YAML fields without creating shared filter inputs."""
+    provider = clean["provider"]
+
+    if "category" in clean:
+        if provider == "ml":
+            coerced = _coerce_enum(str(clean["category"]), entry, MercadoLibreCategory, "category")
+            if coerced is None:
+                return None
+            clean["category"] = coerced
+
+    if provider == "lv":
+        page_value = None
+        if "page" in clean:
+            page_value = _coerce_liverpool_page(str(clean["page"]), entry, "page")
+            if page_value is None:
+                return None
+            clean["page"] = page_value
+
+        if "category" in clean:
+            category_value = _coerce_liverpool_page(str(clean["category"]), entry, "category")
+            if category_value is None:
+                return None
+            if page_value is not None and page_value != category_value:
+                logger.warning(
+                    "Liverpool entry %r has conflicting 'page' and legacy 'category' values.",
+                    entry,
+                )
+                return None
+            clean["page"] = category_value
+            clean.pop("category", None)
+
+    if "seller" in clean:
+        if provider == "az":
+            coerced = _coerce_enum(str(clean["seller"]), entry, AmazonSeller, "seller")
+            if coerced is None:
+                return None
+            clean["seller"] = coerced
+        elif provider == "lv":
+            clean.pop("seller")
+            logger.warning(
+                "Liverpool job %r includes unsupported 'seller'; generated Liverpool URLs "
+                "always filter to Liverpool seller. Use explicit 'url' for custom sellers.",
+                clean["search_term"],
+            )
+
+    return clean
 
 
 def _validate_and_coerce(entry: Any, index: int) -> dict | None:
@@ -117,23 +170,10 @@ def _validate_and_coerce(entry: Any, index: int) -> dict | None:
 
     clean: dict = dict(entry)
 
-    if "category" in clean:
-        coerced = _coerce_category(str(clean["category"]), entry)
-        if coerced is None:
-            return None
-        clean["category"] = coerced
-
-    # Coerce `seller` string → Seller enum
-    if "seller" in clean:
-        coerced = _coerce_seller(str(clean["seller"]), entry)
-        if coerced is None:
-            return None
-        clean["seller"] = coerced
-
     # Normalise search_term to str (YAML may parse numeric-looking values as int)
     clean["search_term"] = str(search_term).strip()
 
-    return clean
+    return _coerce_provider_fields(clean, entry)
 
 
 def load_jobs(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[dict]:

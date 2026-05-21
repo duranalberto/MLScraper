@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from scraper.runtime.notifications import broadcast, broadcast_is_updated, parse_price
+from scraper.runtime.notifications import (
+    broadcast,
+    broadcast_is_updated,
+    broadcast_new_element,
+    parse_price,
+)
 
 
 class ParsePriceTests(unittest.TestCase):
@@ -27,7 +32,7 @@ class BroadcastRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         await broadcast(
             broadcast_type="new_element",
-            element={"title": "New", "is_initial_scrape": True},
+            element={"title": "New", "is_initial_scrape": False},
             send_new=send_new,
             send_price_drop=send_price_drop,
             logger=logger,
@@ -64,6 +69,44 @@ class BroadcastRoutingTests(unittest.IsolatedAsyncioTestCase):
         logger.warning.assert_called_once()
         send_new.assert_not_awaited()
         send_price_drop.assert_not_awaited()
+
+
+class NewElementBroadcastTests(unittest.IsolatedAsyncioTestCase):
+    async def test_initial_scrape_new_item_is_not_sent(self) -> None:
+        send_new = AsyncMock()
+        logger = Mock()
+
+        await broadcast_new_element(
+            {
+                "search_term": "New job",
+                "title": "Baseline item",
+                "is_initial_scrape": True,
+            },
+            send_new=send_new,
+            logger=logger,
+        )
+
+        send_new.assert_not_awaited()
+        logger.info.assert_not_called()
+
+    async def test_non_initial_new_item_is_sent(self) -> None:
+        send_new = AsyncMock()
+        logger = Mock()
+        element = {
+            "search_term": "Existing job",
+            "title": "New arrival",
+            "price": 100.0,
+            "url": "https://example.test/item",
+        }
+
+        await broadcast_new_element(
+            element,
+            send_new=send_new,
+            logger=logger,
+        )
+
+        send_new.assert_awaited_once_with(element)
+        logger.info.assert_called_once()
 
 
 class PriceDropBroadcastTests(unittest.IsolatedAsyncioTestCase):

@@ -1,8 +1,9 @@
 import json
 import logging
-import re
 from bs4 import BeautifulSoup
 from shared.scraping.motor import Motor
+
+from .urls import append_page_segment, current_page_number
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +70,10 @@ class Liverpool(Motor):
 
         try:
             noOfPages = int(page_object["query"]["data"]["mainContent"]["pageInfo"]["noOfPages"])
-            pattern = r"/page-(\d+)$"
-            matches = re.findall(pattern, body["url"])
-            currentPage = int(matches[-1]) if matches else 1
+            currentPage = current_page_number(body["url"])
             next_page = currentPage + 1
             if currentPage < noOfPages:
-                next_url = f"{self.url}/page-{next_page}"
+                next_url = append_page_segment(body["url"], next_page)
         except KeyError, TypeError, ValueError:
             pass
 

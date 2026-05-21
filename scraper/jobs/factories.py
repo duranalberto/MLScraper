@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import unicodedata
 
 from provider.amazon.motor import Amazon
 from provider.amazon.options import Seller
 from provider.liverpool.motor import Liverpool
+from provider.liverpool.options import Brand as LiverpoolBrand
+from provider.liverpool.options import Page as LiverpoolPage
+from provider.liverpool.urls import build_liverpool_url
 from provider.mercado_libre.motor import MercadoLibre
 from provider.mercado_libre.options import Category
 from provider.palacio_de_hierro.motor import PalacioDeHierro
 
 from .registry import MotorRegistry
+
+logger = logging.getLogger(__name__)
 
 
 def _slug(text: str) -> str:
@@ -89,15 +95,39 @@ def _az_factory(
     return Amazon(search_term, seller, storage_path=path)
 
 
-def _lv_factory(search_term: str, url: str, **_) -> Liverpool:
+def _lv_factory(
+    search_term: str,
+    url: str | None = None,
+    query: str | None = None,
+    page: LiverpoolPage | None = None,
+    category: LiverpoolPage | None = None,
+    brand: LiverpoolBrand | str | None = None,
+    **_,
+) -> Liverpool:
     """
-    Liverpool jobs are always identified by their explicit search_term label
-    (e.g. "LV Laptops") which is already unique by convention.
-    No qualifier needed.
+    Liverpool jobs use an explicit URL when provided, otherwise the URL is
+    generated from Liverpool-specific job fields and constrained to Liverpool
+    as seller.
 
     Example:
         search_term="LV Laptops"  →  liverpool/lv-laptops.json
     """
+    if url and (query or page or category or brand):
+        logger.warning(
+            "Liverpool job %r uses explicit url; ignoring page/category/query/brand filters. "
+            "Remove 'url' to use structured Liverpool search fields.",
+            search_term,
+        )
+
+    if not url:
+        url = build_liverpool_url(
+            search_term,
+            query=query,
+            page=page,
+            category=category,
+            brand=brand,
+        )
+
     path = _storage_path("liverpool", search_term)
     return Liverpool(search_term, url, storage_path=path)
 

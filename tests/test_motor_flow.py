@@ -233,6 +233,32 @@ class MotorScrapeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([article.identifier for article in motor.active], ["two", "one"])
 
+    async def test_first_run_logs_single_notification_skip_notice(self) -> None:
+        motor = make_motor(
+            [
+                (
+                    [
+                        {"identifier": "one", "title": "One", "price": 1.0},
+                        {"identifier": "two", "title": "Two", "price": 2.0},
+                    ],
+                    None,
+                )
+            ]
+        )
+        caller = AsyncMock()
+        motor.save_to_file = AsyncMock()  # type: ignore[method-assign]
+
+        with patch("shared.scraping.motor.logger") as logger:
+            await motor.scrape(caller=caller, silent=False)
+
+        skip_logs = [
+            call
+            for call in logger.info.call_args_list
+            if "first run: Telegram notifications will be skipped" in call.args[0]
+        ]
+        self.assertEqual(len(skip_logs), 1)
+        self.assertEqual(caller.await_count, 2)
+
 
 class MotorUtilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_mark_blocked_sets_deadline_inside_running_loop(self) -> None:

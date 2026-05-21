@@ -16,10 +16,17 @@ Provider-specific fields:
 
 - Mercado Libre (`ml`): optional `category`, optional `url`.
 - Amazon (`az`): optional `seller`.
-- Liverpool (`lv`): required `url`.
+- Liverpool (`lv`): optional `url`, optional `query`, optional Liverpool
+  `page`. Generated URLs resolve Liverpool's seller filter at job creation.
+  Page + query jobs use the root `N-` token route so Liverpool preserves both
+  seller and page refinements.
+  Legacy `category` is accepted as an alias for `page`. Explicit `url` is the
+  only bypass and is used unchanged, including custom sellers or unmodeled
+  filter combinations.
 - Palacio de Hierro (`ph`): required `url`.
 
 Use `config/jobs.yaml.example` as a safe starting template.
+See [Liverpool](LIVERPOOL.md) for the page catalogue and URL validation notes.
 
 ## `config/motors.yaml`
 

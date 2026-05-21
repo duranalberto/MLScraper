@@ -86,6 +86,7 @@ More detail:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Data Model](docs/DATA_MODEL.md)
+- [Liverpool](docs/LIVERPOOL.md)
 - [Testing](docs/TESTING.md)
 - [Adding a Provider](docs/ADDING_PROVIDER.md)
 - [Operations](docs/OPERATIONS.md)
