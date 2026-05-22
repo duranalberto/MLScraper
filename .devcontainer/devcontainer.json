@@ -17,7 +17,7 @@
       "onAutoForward": "notify"
     }
   },
-  "postCreateCommand": "git config --global core.editor 'code --wait' && git config --global --add safe.directory /workspaces/MLScraper && if [ -d .git ]; then pre-commit install; fi",
+  "postCreateCommand": "if [ -d .git ]; then pre-commit install; fi",
   "customizations": {
     "vscode": {
       "settings": {
