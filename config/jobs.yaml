@@ -3,6 +3,8 @@
 # Each entry requires a `provider` key that maps to a registered factory and a
 # provider-local `job_id`. Keep `job_id` stable for storage linkage and unique
 # within that provider; provider-specific keys are forwarded to the factory.
+# All providers support `job_id`, `url`, and `query`. Non-blank `url` values
+# bypass generated provider option logic and are used unchanged.
 #
 # Providers
 # ─────────

@@ -61,6 +61,14 @@ def _storage_path(provider: str, job_id: str, qualifier: str = "") -> str:
     return f"{provider}/{name}.json"
 
 
+def _explicit_url(url: str | None) -> str | None:
+    """Return a stripped explicit URL when one is configured."""
+    if url is None:
+        return None
+    value = str(url).strip()
+    return value or None
+
+
 def _ml_factory(
     job_id: str,
     url: str | None = None,
@@ -78,20 +86,23 @@ def _ml_factory(
         job_id="zelda wii"                          → mercado_libre/zelda-wii.json
         job_id="nintendo ds", category=consolas     → mercado_libre/nintendo-ds__consolas.json
     """
-    if url and (query or seller or category or state):
+    explicit_url = _explicit_url(url)
+    if explicit_url and (query or seller or category or state):
         logger.warning(
             "Mercado Libre job %r uses explicit url; ignoring query/seller/category/state "
             "filters. Remove 'url' to use structured Mercado Libre search fields.",
             job_id,
         )
+    if explicit_url:
+        path = _storage_path("mercado_libre", job_id)
+        return MercadoLibre(job_id, explicit_url, storage_path=path)
 
-    if not url:
-        url = build_mercado_libre_url(
-            query=query,
-            seller=seller,
-            category=category,
-            state=state,
-        )
+    url = build_mercado_libre_url(
+        query=query,
+        seller=seller,
+        category=category,
+        state=state,
+    )
 
     qualifier = "-".join(option.name for option in (seller, category, state) if option is not None)
     path = _storage_path("mercado_libre", job_id, qualifier)
@@ -118,19 +129,22 @@ def _az_factory(
                                            → amazon/ugreen-store__ugreen-group-limited.json
         job_id="apple", query="apple", brand=apple       → amazon/apple__apple.json
     """
-    if url and (query or seller != AmazonSeller.none or brand):
+    explicit_url = _explicit_url(url)
+    if explicit_url and (query or seller != AmazonSeller.none or brand):
         logger.warning(
             "Amazon job %r uses explicit url; ignoring query/seller/brand filters. "
             "Remove 'url' to use structured Amazon search fields.",
             job_id,
         )
+    if explicit_url:
+        path = _storage_path("amazon", job_id)
+        return Amazon(job_id, explicit_url, storage_path=path)
 
-    if not url:
-        url = build_amazon_url(
-            query=query,
-            seller=seller,
-            brand=brand,
-        )
+    url = build_amazon_url(
+        query=query,
+        seller=seller,
+        brand=brand,
+    )
 
     qualifier = "-".join(
         option.name
@@ -158,20 +172,23 @@ def _lv_factory(
     Example:
         job_id="LV Laptops"  →  liverpool/lv-laptops.json
     """
-    if url and (query or page or category or brand):
+    explicit_url = _explicit_url(url)
+    if explicit_url and (query or page or category or brand):
         logger.warning(
             "Liverpool job %r uses explicit url; ignoring page/category/query/brand filters. "
             "Remove 'url' to use structured Liverpool search fields.",
             job_id,
         )
+    if explicit_url:
+        path = _storage_path("liverpool", job_id)
+        return Liverpool(job_id, explicit_url, storage_path=path)
 
-    if not url:
-        url = build_liverpool_url(
-            query=query,
-            page=page,
-            category=category,
-            brand=brand,
-        )
+    url = build_liverpool_url(
+        query=query,
+        page=page,
+        category=category,
+        brand=brand,
+    )
 
     path = _storage_path("liverpool", job_id)
     return Liverpool(job_id, url, storage_path=path)
@@ -192,19 +209,22 @@ def _ph_factory(
     Example:
         job_id="PH Macbook Air"  →  palacio_de_hierro/ph-macbook-air.json
     """
-    if url and (query or page or brands):
+    explicit_url = _explicit_url(url)
+    if explicit_url and (query or page or brands):
         logger.warning(
             "Palacio job %r uses explicit url; ignoring page/query/brands filters. "
             "Remove 'url' to use structured Palacio search fields.",
             job_id,
         )
+    if explicit_url:
+        path = _storage_path("palacio_de_hierro", job_id)
+        return PalacioDeHierro(job_id, explicit_url, storage_path=path)
 
-    if not url:
-        url = build_palacio_url(
-            query=query,
-            page=page,
-            brands=brands,
-        )
+    url = build_palacio_url(
+        query=query,
+        page=page,
+        brands=brands,
+    )
 
     path = _storage_path("palacio_de_hierro", job_id)
     return PalacioDeHierro(job_id, url, storage_path=path)

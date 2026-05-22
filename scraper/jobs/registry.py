@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any, Callable
 
@@ -9,6 +10,34 @@ logger = logging.getLogger(__name__)
 
 MotorFactory = Callable[..., Motor]
 MotorEntry = dict[str, Any]
+REQUIRED_FACTORY_PARAMETERS = ("job_id", "url", "query")
+
+
+def _validate_factory_signature(provider: str, fn: MotorFactory) -> None:
+    """Require provider factories to expose the shared job contract."""
+    signature = inspect.signature(fn)
+    missing: list[str] = []
+    invalid_kind: list[str] = []
+
+    for name in REQUIRED_FACTORY_PARAMETERS:
+        parameter = signature.parameters.get(name)
+        if parameter is None:
+            missing.append(name)
+            continue
+        if parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+            invalid_kind.append(name)
+
+    if missing or invalid_kind:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing parameters: {', '.join(missing)}")
+        if invalid_kind:
+            details.append("must not be positional-only: " + ", ".join(invalid_kind))
+        detail_text = "; ".join(details)
+        raise ValueError(
+            f"Factory for provider '{provider}' must declare job contract parameters "
+            f"{REQUIRED_FACTORY_PARAMETERS}. Signature {signature} is invalid ({detail_text})."
+        )
 
 
 class MotorRegistry:
@@ -18,6 +47,7 @@ class MotorRegistry:
 
     def factory(self, provider: str) -> Callable[[MotorFactory], MotorFactory]:
         def decorator(fn: MotorFactory) -> MotorFactory:
+            _validate_factory_signature(provider, fn)
             if provider in self._factories:
                 logger.warning("Overwriting existing factory for provider '%s'.", provider)
             self._factories[provider] = fn

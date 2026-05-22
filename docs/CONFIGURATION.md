@@ -13,6 +13,16 @@ Every job requires:
 - `job_id`: stable provider-local job identifier used for runtime labelling and
   storage naming. Keep the value stable to keep the same data source.
 
+All provider factories must support these shared job parameters:
+
+- `job_id`: required stable identity.
+- `url`: optional explicit URL bypass.
+- `query`: optional human-readable search text adapted by each provider.
+
+When a non-blank `url` is present, it is the only authoritative route input.
+Provider-specific generated option fields are ignored for URL generation even if
+those option values are invalid or unsupported.
+
 `job_id` must be unique within each provider. The same value can be reused by
 different providers, such as one `Apple` job for Liverpool and one for Palacio,
 but a provider cannot define two `Apple` jobs.

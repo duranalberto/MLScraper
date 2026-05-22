@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 from provider.amazon.options import Brand as AmazonBrand
@@ -185,6 +186,98 @@ jobs:
         jobs = load_jobs(path)
 
         self.assertEqual(jobs, [])
+
+    def test_load_jobs_url_bypass_skips_provider_field_validation(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: ml
+    job_id: ml bypass
+    url: https://example.test/ml
+    seller: missing
+    category: unknown
+    state: invalid
+  - provider: az
+    job_id: az bypass
+    url: https://example.test/az
+    seller: missing
+    brand: unknown
+  - provider: lv
+    job_id: lv bypass
+    url: https://example.test/lv
+    page: missing
+    category: also_missing
+    seller: unsupported
+  - provider: ph
+    job_id: ph bypass
+    url: https://example.test/ph
+    page: missing
+    brands:
+      - apple
+      - 15
+""")
+
+        jobs = load_jobs(path)
+
+        self.assertEqual(
+            jobs,
+            [
+                {
+                    "provider": "ml",
+                    "job_id": "ml bypass",
+                    "url": "https://example.test/ml",
+                    "seller": "missing",
+                    "category": "unknown",
+                    "state": "invalid",
+                },
+                {
+                    "provider": "az",
+                    "job_id": "az bypass",
+                    "url": "https://example.test/az",
+                    "seller": "missing",
+                    "brand": "unknown",
+                },
+                {
+                    "provider": "lv",
+                    "job_id": "lv bypass",
+                    "url": "https://example.test/lv",
+                    "page": "missing",
+                    "category": "also_missing",
+                    "seller": "unsupported",
+                },
+                {
+                    "provider": "ph",
+                    "job_id": "ph bypass",
+                    "url": "https://example.test/ph",
+                    "page": "missing",
+                    "brands": ["apple", 15],
+                },
+            ],
+        )
+
+    def test_load_jobs_url_bypass_allows_conflicting_liverpool_page_aliases(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: lv
+    job_id: lv conflict bypass
+    url: https://example.test/lv
+    page: laptops
+    category: tablets
+""")
+
+        jobs = load_jobs(path)
+
+        self.assertEqual(
+            jobs,
+            [
+                {
+                    "provider": "lv",
+                    "job_id": "lv conflict bypass",
+                    "url": "https://example.test/lv",
+                    "page": "laptops",
+                    "category": "tablets",
+                }
+            ],
+        )
 
     def test_load_jobs_handles_empty_jobs_list_and_rejects_bad_structure(self) -> None:
         empty_path = self._write_jobs("jobs:\n")
@@ -393,6 +486,7 @@ class FactoryTests(unittest.TestCase):
                 )
 
         self.assertEqual(motor.url, "https://example.test/custom")
+        self.assertEqual(motor.storage_path, "mercado_libre/custom-mercado.json")
         self.assertIn("ignoring query/seller/category/state", "\n".join(logs.output))
 
     def test_amazon_factory_generates_filter_urls_and_storage_variants(self) -> None:
@@ -446,6 +540,7 @@ class FactoryTests(unittest.TestCase):
                 )
 
         self.assertEqual(motor.url, "https://example.test/custom")
+        self.assertEqual(motor.storage_path, "amazon/custom.json")
         self.assertIn("ignoring query/seller/brand", "\n".join(logs.output))
 
     def test_liverpool_factory_generates_url_without_explicit_url(self) -> None:
@@ -473,6 +568,7 @@ class FactoryTests(unittest.TestCase):
                 )
 
         self.assertEqual(motor.url, "https://example.test/custom")
+        self.assertEqual(motor.storage_path, "liverpool/custom.json")
         self.assertIn("ignoring page/category/query/brand", "\n".join(logs.output))
 
     def test_liverpool_factory_rejects_generated_brand_filter(self) -> None:
@@ -553,7 +649,64 @@ class FactoryTests(unittest.TestCase):
                 )
 
         self.assertEqual(motor.url, "https://example.test/custom")
+        self.assertEqual(motor.storage_path, "palacio_de_hierro/custom.json")
         self.assertIn("ignoring page/query/brands", "\n".join(logs.output))
+
+    def test_explicit_url_short_circuits_generated_builders(self) -> None:
+        with empty_article_storage():
+            with (
+                patch(
+                    "scraper.jobs.factories.build_mercado_libre_url",
+                    side_effect=AssertionError("mercado builder called"),
+                ),
+                patch(
+                    "scraper.jobs.factories.build_amazon_url",
+                    side_effect=AssertionError("amazon builder called"),
+                ),
+                patch(
+                    "scraper.jobs.factories.build_liverpool_url",
+                    side_effect=AssertionError("liverpool builder called"),
+                ),
+                patch(
+                    "scraper.jobs.factories.build_palacio_url",
+                    side_effect=AssertionError("palacio builder called"),
+                ),
+            ):
+                ml_motor = factories._ml_factory(
+                    "ML bypass malformed",
+                    url="https://example.test/ml",
+                    query="ignored",
+                    seller=cast(Any, ["bad"]),
+                    category=cast(Any, {"bad": "type"}),
+                    state=cast(Any, object()),
+                )
+                az_motor = factories._az_factory(
+                    "AZ bypass malformed",
+                    url="https://example.test/az",
+                    query="ignored",
+                    seller=cast(Any, ["bad"]),
+                    brand=cast(Any, {"bad": "type"}),
+                )
+                lv_motor = factories._lv_factory(
+                    "LV bypass malformed",
+                    url="https://example.test/lv",
+                    query="ignored",
+                    page=cast(Any, {"bad": "type"}),
+                    category=cast(Any, ["bad"]),
+                    brand=cast(Any, object()),
+                )
+                ph_motor = factories._ph_factory(
+                    "PH bypass malformed",
+                    url="https://example.test/ph",
+                    query="ignored",
+                    page=cast(Any, {"bad": "type"}),
+                    brands=cast(Any, object()),
+                )
+
+        self.assertEqual(ml_motor.url, "https://example.test/ml")
+        self.assertEqual(az_motor.url, "https://example.test/az")
+        self.assertEqual(lv_motor.url, "https://example.test/lv")
+        self.assertEqual(ph_motor.url, "https://example.test/ph")
 
 
 class MotorRegistryTests(unittest.TestCase):
@@ -565,9 +718,12 @@ class MotorRegistryTests(unittest.TestCase):
 
     def test_build_skips_unknown_provider_and_factory_errors(self) -> None:
         registry = MotorRegistry()
-        registry.factory("ok")(lambda job_id: {"job_id": job_id})  # type: ignore[return-value]
+        ok_factory = cast(Any, lambda job_id, url=None, query=None: {"job_id": job_id})
+        registry.factory("ok")(ok_factory)
 
-        def failing_factory(job_id: str) -> object:
+        def failing_factory(
+            job_id: str, url: str | None = None, query: str | None = None
+        ) -> object:
             raise RuntimeError("boom")
 
         registry.factory("bad")(failing_factory)  # type: ignore[arg-type]
@@ -585,10 +741,35 @@ class MotorRegistryTests(unittest.TestCase):
 
     def test_clear_entries_preserves_factories(self) -> None:
         registry = MotorRegistry()
-        registry.factory("ok")(lambda job_id: {"job_id": job_id})  # type: ignore[return-value]
+        ok_factory = cast(Any, lambda job_id, url=None, query=None: {"job_id": job_id})
+        registry.factory("ok")(ok_factory)
         registry.register({"provider": "ok", "job_id": "one"})
         registry.clear_entries()
         registry.register({"provider": "ok", "job_id": "two"})
 
         self.assertEqual(registry.providers, ["ok"])
         self.assertEqual(registry.build(), [{"job_id": "two"}])
+
+    def test_factory_registration_requires_job_contract_parameters(self) -> None:
+        registry = MotorRegistry()
+
+        with self.assertRaisesRegex(ValueError, "must declare job contract parameters"):
+            registry.factory("bad")(lambda job_id: {"job_id": job_id})  # type: ignore[return-value]
+
+        def positional_only(job_id, /, url=None, query=None):  # type: ignore[no-untyped-def]
+            return {"job_id": job_id}
+
+        with self.assertRaisesRegex(ValueError, "must not be positional-only"):
+            registry.factory("bad2")(positional_only)  # type: ignore[arg-type]
+
+    def test_factory_registration_accepts_job_contract_parameters(self) -> None:
+        registry = MotorRegistry()
+
+        def valid_factory(
+            job_id: str, url: str | None = None, query: str | None = None, **_
+        ) -> dict:
+            return {"job_id": job_id}
+
+        registry.factory("ok")(valid_factory)  # type: ignore[arg-type]
+        registry.register({"provider": "ok", "job_id": "keep"})
+        self.assertEqual(registry.build(), [{"job_id": "keep"}])

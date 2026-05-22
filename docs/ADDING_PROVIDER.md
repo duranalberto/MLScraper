@@ -11,6 +11,7 @@ needs multiple parsing modes or pagination helpers.
 3. Set `PROVIDER_KEY` on the motor.
 4. Implement `scrape_page(self, body)` and return `(items, next_url)`.
 5. Register a factory in `scraper/jobs/factories.py` with a short provider key.
+   Factory signatures must include `job_id`, `url`, and `query`.
 6. Add any enum coercion needed by YAML jobs in `scraper/jobs/loader.py`.
 7. Add default or provider-specific policy in `config/motors.yaml`.
 8. Add a safe example job to `config/jobs.yaml.example`.
@@ -58,6 +59,21 @@ provider_name/job-id__qualifier.json
 ```
 
 Do not let job input produce absolute paths or parent-directory traversal.
+
+## Shared Job Contract
+
+All providers must support this minimum `config/jobs.yaml` interface:
+
+- `job_id` (required): stable provider-local identity.
+- `url` (optional): explicit URL bypass.
+- `query` (optional): human-readable search text for generated provider routes.
+
+Behavior requirements:
+
+- Non-blank `url` is the only bypass of generated provider option logic.
+- When `url` is set, providers must use it unchanged for routing.
+- Provider-specific generated options remain provider-owned and optional when
+  `url` is absent.
 
 ## Tests
 

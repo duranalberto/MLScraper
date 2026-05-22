@@ -31,6 +31,7 @@ Edge cases handled
 • Entry is not a dict                      → entry skipped with a warning
 • Entry missing required `provider` key   → entry skipped with a warning
 • Unknown provider-specific enum string   → entry skipped with a warning
+                                              (unless explicit non-blank `url` is set)
 • `job_id` is missing or blank             → entry skipped with a warning
 • `search_term` legacy key is present      → entry skipped with a warning
 • duplicate `(provider, job_id)` entries   → ValueError
@@ -244,6 +245,13 @@ def _validate_and_coerce(entry: Any, index: int) -> dict | None:
 
     # Normalise job_id to str (YAML may parse numeric-looking values as int).
     clean["job_id"] = str(job_id).strip()
+
+    # Explicit non-blank URLs bypass provider option coercion and validation.
+    raw_url = clean.get("url")
+    explicit_url = str(raw_url).strip() if raw_url is not None else ""
+    if explicit_url:
+        clean["url"] = explicit_url
+        return clean
 
     return _coerce_provider_fields(clean, entry)
 

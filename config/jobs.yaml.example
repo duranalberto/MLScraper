@@ -2,6 +2,8 @@
 # Copy selected entries into config/jobs.yaml and edit values for your use case.
 # Every entry needs a provider-local `job_id`; keep it stable and unique within
 # that provider so it continues to identify the same persisted job data.
+# Every provider supports `job_id`, `url`, and `query`. When non-blank `url`
+# exists, it is used as-is and generated provider option fields are ignored.
 
 jobs:
   # `job_id` is stable provider-local identity; `query` is search text.
