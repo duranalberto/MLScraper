@@ -53,8 +53,8 @@ Factories build relative paths below `DATA_PATH`. Use stable, descriptive paths
 grouped by provider:
 
 ```text
-provider_name/search-term.json
-provider_name/search-term__qualifier.json
+provider_name/job-id.json
+provider_name/job-id__qualifier.json
 ```
 
 Do not let job input produce absolute paths or parent-directory traversal.

@@ -4,7 +4,7 @@ scraper/jobs/loader.py
 YAML Job Catalogue Loader
 ─────────────────────────
 Loads scraping job entries from a YAML file and coerces provider-specific
-string values (category, seller, and Liverpool page names) into their proper
+string values (category, seller, and provider page names) into their proper
 enum types.
 
 Design decisions
@@ -31,8 +31,9 @@ Edge cases handled
 • Entry is not a dict                      → entry skipped with a warning
 • Entry missing required `provider` key   → entry skipped with a warning
 • Unknown provider-specific enum string   → entry skipped with a warning
-• `search_term` is missing or blank        → entry skipped with a warning
-• `url` required for ph but absent        → entry skipped with a warning
+• `job_id` is missing or blank             → entry skipped with a warning
+• `search_term` legacy key is present      → entry skipped with a warning
+• duplicate `(provider, job_id)` entries   → ValueError
 """
 
 from __future__ import annotations
@@ -43,14 +44,17 @@ from typing import Any
 
 import yaml
 
+from provider.amazon.options import Brand as AmazonBrand
 from provider.amazon.options import Seller as AmazonSeller
 from provider.liverpool.options import Page as LiverpoolPage
 from provider.liverpool.options import resolve_page
 from provider.mercado_libre.options import Category as MercadoLibreCategory
+from provider.mercado_libre.options import Seller as MercadoLibreSeller
+from provider.mercado_libre.options import State as MercadoLibreState
+from provider.palacio_de_hierro.options import Page as PalacioPage
+from provider.palacio_de_hierro.options import resolve_page as resolve_palacio_page
 
 logger = logging.getLogger(__name__)
-
-_URL_REQUIRED_PROVIDERS = {"ph"}
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "jobs.yaml"
@@ -87,6 +91,40 @@ def _coerce_liverpool_page(raw: str, entry: dict, field_name: str) -> LiverpoolP
         return None
 
 
+def _coerce_palacio_page(raw: str, entry: dict, field_name: str) -> PalacioPage | None:
+    """Convert a Palacio page string to a Page enum member, or return None."""
+    try:
+        return resolve_palacio_page(raw)
+    except ValueError as exc:
+        logger.warning(
+            "Unknown %s %r in entry %r. %s",
+            field_name,
+            raw,
+            entry,
+            exc,
+        )
+        return None
+
+
+def _coerce_palacio_brands(raw: Any, entry: dict) -> str | list[str] | None:
+    """Validate Palacio brand filters without choosing URL path semantics."""
+    if isinstance(raw, str):
+        value = raw.strip()
+        if value:
+            return value
+    elif isinstance(raw, list):
+        values = [value.strip() for value in raw if isinstance(value, str)]
+        if len(values) == len(raw) and values and all(values):
+            return values
+
+    logger.warning(
+        "Palacio entry %r has invalid 'brands'; use one brand string or a non-empty list "
+        "of brand strings.",
+        entry,
+    )
+    return None
+
+
 def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
     """Coerce provider-owned YAML fields without creating shared filter inputs."""
     provider = clean["provider"]
@@ -97,6 +135,12 @@ def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
             if coerced is None:
                 return None
             clean["category"] = coerced
+
+    if provider == "ml" and "state" in clean:
+        state = _coerce_enum(str(clean["state"]), entry, MercadoLibreState, "state")
+        if state is None:
+            return None
+        clean["state"] = state
 
     if provider == "lv":
         page_value = None
@@ -119,9 +163,38 @@ def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
             clean["page"] = category_value
             clean.pop("category", None)
 
+    if provider == "ph":
+        if "page" in clean:
+            page_value = _coerce_palacio_page(str(clean["page"]), entry, "page")
+            if page_value is None:
+                return None
+            clean["page"] = page_value
+
+        if "brands" in clean:
+            brands = _coerce_palacio_brands(clean["brands"], entry)
+            if brands is None:
+                return None
+            clean["brands"] = brands
+
+    if provider == "az" and "brand" in clean:
+        brand = _coerce_enum(str(clean["brand"]), entry, AmazonBrand, "brand")
+        if brand is None:
+            return None
+        clean["brand"] = brand
+
     if "seller" in clean:
         if provider == "az":
             coerced = _coerce_enum(str(clean["seller"]), entry, AmazonSeller, "seller")
+            if coerced is None:
+                return None
+            clean["seller"] = coerced
+        elif provider == "ml":
+            coerced = _coerce_enum(
+                str(clean["seller"]),
+                entry,
+                MercadoLibreSeller,
+                "seller",
+            )
             if coerced is None:
                 return None
             clean["seller"] = coerced
@@ -130,7 +203,7 @@ def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
             logger.warning(
                 "Liverpool job %r includes unsupported 'seller'; generated Liverpool URLs "
                 "always filter to Liverpool seller. Use explicit 'url' for custom sellers.",
-                clean["search_term"],
+                clean["job_id"],
             )
 
     return clean
@@ -150,30 +223,49 @@ def _validate_and_coerce(entry: Any, index: int) -> dict | None:
         logger.warning("Job #%d is missing a valid 'provider' key — skipped: %r", index, entry)
         return None
 
-    search_term = entry.get("search_term")
-    if not search_term or not str(search_term).strip():
+    if "search_term" in entry:
         logger.warning(
-            "Job #%d (provider=%r) is missing a non-blank 'search_term' — skipped.",
+            "Job #%d (provider=%r) uses legacy 'search_term'; replace it with 'job_id' — skipped.",
             index,
             provider,
         )
         return None
 
-    if provider in _URL_REQUIRED_PROVIDERS and not entry.get("url"):
+    job_id = entry.get("job_id")
+    if not job_id or not str(job_id).strip():
         logger.warning(
-            "Job #%d (provider=%r, search_term=%r) requires a 'url' field — skipped.",
+            "Job #%d (provider=%r) is missing a non-blank 'job_id' — skipped.",
             index,
             provider,
-            search_term,
         )
         return None
 
     clean: dict = dict(entry)
 
-    # Normalise search_term to str (YAML may parse numeric-looking values as int)
-    clean["search_term"] = str(search_term).strip()
+    # Normalise job_id to str (YAML may parse numeric-looking values as int).
+    clean["job_id"] = str(job_id).strip()
 
     return _coerce_provider_fields(clean, entry)
+
+
+def _validate_unique_job_ids(entries: list[dict]) -> None:
+    """Require each provider-local job identifier to map to one job."""
+    seen: set[tuple[str, str]] = set()
+    duplicates: set[tuple[str, str]] = set()
+
+    for entry in entries:
+        key = (entry["provider"], entry["job_id"])
+        if key in seen:
+            duplicates.add(key)
+        seen.add(key)
+
+    if duplicates:
+        values = ", ".join(
+            f"(provider={provider!r}, job_id={job_id!r})" for provider, job_id in sorted(duplicates)
+        )
+        raise ValueError(
+            "Duplicate job_id values within the same provider are not allowed: " f"{values}."
+        )
 
 
 def load_jobs(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[dict]:
@@ -235,6 +327,8 @@ def load_jobs(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[dict]:
         clean = _validate_and_coerce(raw_entry, index)
         if clean is not None:
             entries.append(clean)
+
+    _validate_unique_job_ids(entries)
 
     loaded = len(entries)
     skipped = len(jobs_raw) - loaded

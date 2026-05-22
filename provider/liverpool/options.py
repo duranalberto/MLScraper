@@ -64,8 +64,7 @@ class Page(Enum):
         slug="electrodomésticos-de-cocina",
         category_id="CATST42832953",
         canonical_url=(
-            "https://www.liverpool.com.mx/tienda/"
-            "electrodom%C3%A9sticos-de-cocina/catst42832953"
+            "https://www.liverpool.com.mx/tienda/" "electrodom%C3%A9sticos-de-cocina/catst42832953"
         ),
     )
     cafeteras_y_molinos = LiverpoolPage(
@@ -79,10 +78,7 @@ class Page(Enum):
         ),
         slug="cafeteras-y-molinos",
         category_id="CATST42843585",
-        canonical_url=(
-            "https://www.liverpool.com.mx/tienda/"
-            "cafeteras-y-molinos/catst42843585"
-        ),
+        canonical_url=("https://www.liverpool.com.mx/tienda/" "cafeteras-y-molinos/catst42843585"),
     )
     licuadoras = LiverpoolPage(
         display_name="Licuadoras",
@@ -121,10 +117,7 @@ class Page(Enum):
         ),
         slug="hornos-de-microondas",
         category_id="CATST42843550",
-        canonical_url=(
-            "https://www.liverpool.com.mx/tienda/"
-            "hornos-de-microondas/catst42843550"
-        ),
+        canonical_url=("https://www.liverpool.com.mx/tienda/" "hornos-de-microondas/catst42843550"),
     )
     hornos_electricos = LiverpoolPage(
         display_name="Hornos Eléctricos",
@@ -138,8 +131,7 @@ class Page(Enum):
         slug="hornos-eléctricos",
         category_id="CATST53843927",
         canonical_url=(
-            "https://www.liverpool.com.mx/tienda/"
-            "hornos-el%C3%A9ctricos/catst53843927"
+            "https://www.liverpool.com.mx/tienda/" "hornos-el%C3%A9ctricos/catst53843927"
         ),
         aliases=("Hornos eléctricos",),
     )
@@ -149,10 +141,7 @@ class Page(Enum):
         breadcrumb=("Home", "Electrónica", "Computación"),
         slug="computación",
         category_id="CAT3410055",
-        canonical_url=(
-            "https://www.liverpool.com.mx/tienda/"
-            "computaci%C3%B3n/cat3410055"
-        ),
+        canonical_url=("https://www.liverpool.com.mx/tienda/" "computaci%C3%B3n/cat3410055"),
     )
     laptops = LiverpoolPage(
         display_name="Laptops",
@@ -177,8 +166,7 @@ class Page(Enum):
         slug="accesorios-computación",
         category_id="CAT670053",
         canonical_url=(
-            "https://www.liverpool.com.mx/tienda/"
-            "accesorios-computaci%C3%B3n/cat670053"
+            "https://www.liverpool.com.mx/tienda/" "accesorios-computaci%C3%B3n/cat670053"
         ),
     )
     videojuegos = LiverpoolPage(
@@ -204,10 +192,7 @@ class Page(Enum):
         breadcrumb=("Home", "Videojuegos", "Nintendo", "Consolas Nintendo"),
         slug="consolas-nintendo",
         category_id="CATST16854843",
-        canonical_url=(
-            "https://www.liverpool.com.mx/tienda/"
-            "consolas-nintendo/catst16854843"
-        ),
+        canonical_url=("https://www.liverpool.com.mx/tienda/" "consolas-nintendo/catst16854843"),
     )
     juegos_nintendo = LiverpoolPage(
         display_name="Juegos Nintendo",
@@ -223,10 +208,7 @@ class Page(Enum):
         breadcrumb=("Home", "Videojuegos", "Nintendo", "Controles Nintendo"),
         slug="controles-nintendo",
         category_id="CATST20605695",
-        canonical_url=(
-            "https://www.liverpool.com.mx/tienda/"
-            "controles-nintendo/catst20605695"
-        ),
+        canonical_url=("https://www.liverpool.com.mx/tienda/" "controles-nintendo/catst20605695"),
     )
     apple = LiverpoolPage(
         display_name="Apple",

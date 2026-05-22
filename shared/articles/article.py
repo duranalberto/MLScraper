@@ -194,7 +194,7 @@ class Article:
     def dump(self) -> Dict[str, Any]:
         """
         Serialise to a dict suitable for JSON storage.
-        `search_term` is intentionally omitted — it belongs to the Motor,
+        `job_id` is intentionally omitted — it belongs to the Motor,
         not to individual articles.
         """
         d: Dict[str, Any] = {

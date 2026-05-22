@@ -18,7 +18,7 @@ class ScriptedMotor(Motor):
         self.pages = pages
         self.fetched_urls: list[str] = []
         super().__init__(
-            search_term="Scripted Search",
+            job_id="Scripted Search",
             url="https://example.test/page-1",
             storage_path="tests/scripted.json",
             debug=False,
@@ -98,7 +98,7 @@ class MotorScrapePageTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(motor._scrape_incomplete)
         self.assertEqual(motor.blocked_reason, "empty_paginated_page")
 
-    async def test_new_item_callback_includes_search_term_and_initial_flag(self) -> None:
+    async def test_new_item_callback_includes_job_id_and_initial_flag(self) -> None:
         motor = make_motor(
             [
                 (
@@ -130,7 +130,7 @@ class MotorScrapePageTests(unittest.IsolatedAsyncioTestCase):
         assert call is not None
         kwargs = call.kwargs
         self.assertEqual(kwargs["broadcast_type"], "new_element")
-        self.assertEqual(kwargs["element"]["search_term"], "Scripted Search")
+        self.assertEqual(kwargs["element"]["job_id"], "Scripted Search")
         self.assertTrue(kwargs["element"]["is_initial_scrape"])
 
     async def test_updated_item_callback_uses_is_updated_payload_without_initial_flag(self) -> None:

@@ -5,11 +5,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     TZ=America/Los_Angeles
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
     git \
+    less \
+    openssh-client \
+    procps \
     tzdata \
+    wget \
     zsh \
     && ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime \
     && dpkg-reconfigure -f noninteractive tzdata \
@@ -23,6 +30,8 @@ RUN git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git /root/.oh-my-zsh 
     echo 'export ZSH="$HOME/.oh-my-zsh"'; \
     echo 'ZSH_THEME="powerlevel10k/powerlevel10k"'; \
     echo 'plugins=(git zsh-autosuggestions zsh-syntax-highlighting)'; \
+    echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true'; \
+    echo 'POWERLEVEL9K_INSTANT_PROMPT=quiet'; \
     echo 'POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir vcs)'; \
     echo 'POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=()'; \
     echo 'POWERLEVEL9K_SHORTEN_STRATEGY="truncate_to_first_and_last"'; \

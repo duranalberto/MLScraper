@@ -25,12 +25,13 @@ from utils.headers import _base_headers, get_random_header
 from utils import telegram
 from utils.telegram import _format_price_drop
 from provider.amazon.motor import Amazon
-from provider.amazon.options import Seller
+from provider.amazon.urls import build_amazon_url
 from provider.liverpool.motor import Liverpool
 from scraper.jobs.loader import load_jobs
 from provider.mercado_libre import parser as mercado_libre_parser
 from provider.mercado_libre.motor import MercadoLibre
 from provider.mercado_libre.options import Category
+from provider.mercado_libre.urls import build_global_search_url
 from provider.palacio_de_hierro.motor import PalacioDeHierro
 from tests.helpers import empty_article_storage
 
@@ -59,7 +60,7 @@ class DummyMotor:
     def __init__(self, provider_key: str, concurrency_limit: int | None, probe: Probe) -> None:
         self.provider_key = provider_key
         self.CONCURRENCY_LIMIT = concurrency_limit
-        self.search_term = f"{provider_key}-job"
+        self.job_id = f"{provider_key}-job"
         self.blocked_reason = None
         self._probe = probe
 
@@ -71,7 +72,7 @@ class CycleDummyMotor:
     def __init__(self, provider_key: str, delay: float = 0.0, concurrency_limit: int = 1) -> None:
         self.provider_key = provider_key
         self.CONCURRENCY_LIMIT = concurrency_limit
-        self.search_term = f"{provider_key}-cycle-job"
+        self.job_id = f"{provider_key}-cycle-job"
         self.blocked_reason = None
         self.delay = delay
         self.started = 0
@@ -406,7 +407,7 @@ class TelegramFormatterTests(unittest.TestCase):
     def test_price_drop_message_uses_previous_and_new_price(self) -> None:
         message = _format_price_drop(
             {
-                "search_term": "Nintendo",
+                "job_id": "Nintendo",
                 "title": "Nintendo 3DS",
                 "url": "https://example.test/item",
                 "previous_price": 2000.0,
@@ -454,13 +455,19 @@ class ConfigPathResolutionTests(unittest.TestCase):
 class FetchStrategyConfigTests(unittest.TestCase):
     def test_default_fetch_strategy_is_aiohttp(self) -> None:
         with empty_article_storage():
-            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
+            motor = Amazon(
+                "macbook", build_amazon_url(query="macbook"), storage_path="tests/amazon.json"
+            )
 
         self.assertEqual(motor.FETCH_STRATEGY, "aiohttp")
 
     def test_mercado_libre_fetch_strategy_is_browser(self) -> None:
         with empty_article_storage():
-            motor = MercadoLibre("pokemon ds", Category.consolas, storage_path="tests/ml.json")
+            motor = MercadoLibre(
+                "pokemon ds",
+                build_global_search_url("pokemon ds", category=Category.consolas),
+                storage_path="tests/ml.json",
+            )
 
         self.assertEqual(motor.FETCH_STRATEGY, "browser")
         self.assertEqual(motor.BROWSER_WAIT_SELECTOR, "section.ui-search-results")
@@ -487,7 +494,9 @@ class FetchDelegationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_motor_delegates_to_configured_fetcher(self) -> None:
         with empty_article_storage():
-            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
+            motor = Amazon(
+                "macbook", build_amazon_url(query="macbook"), storage_path="tests/amazon.json"
+            )
         fake_fetcher = AsyncMock()
         fake_fetcher.fetch.return_value = "<html></html>"
 
@@ -503,7 +512,9 @@ class FetchDelegationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_provider_can_opt_into_browser_strategy_by_config_value(self) -> None:
         with empty_article_storage():
-            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
+            motor = Amazon(
+                "macbook", build_amazon_url(query="macbook"), storage_path="tests/amazon.json"
+            )
         motor.FETCH_STRATEGY = "browser"
         fake_fetcher = AsyncMock()
         fake_fetcher.fetch.return_value = "<html></html>"
@@ -527,7 +538,9 @@ class MercadoLibreStabilityTests(unittest.IsolatedAsyncioTestCase):
         """
         with empty_article_storage():
             motor = MercadoLibre(
-                "pokemon ds", Category.consolas, storage_path="tests/ml-js-gate.json"
+                "pokemon ds",
+                build_global_search_url("pokemon ds", category=Category.consolas),
+                storage_path="tests/ml-js-gate.json",
             )
         existing = Article(
             identifier="MLM123", title="Pokemon", price=100.0, url="https://example.test/item"
@@ -551,7 +564,9 @@ class MercadoLibreStabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_browser_fetch_timeout_does_not_reconcile_missing_items(self) -> None:
         with empty_article_storage():
             motor = MercadoLibre(
-                "pokemon ds", Category.consolas, storage_path="tests/ml-timeout.json"
+                "pokemon ds",
+                build_global_search_url("pokemon ds", category=Category.consolas),
+                storage_path="tests/ml-timeout.json",
             )
         existing = Article(
             identifier="MLM123", title="Pokemon", price=100.0, url="https://example.test/item"
@@ -583,7 +598,9 @@ class ProviderParserFixtureTests(unittest.TestCase):
         <a class="s-pagination-next" href="/s?k=macbook&page=2">Next</a>
         """
         with empty_article_storage():
-            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon.json")
+            motor = Amazon(
+                "macbook", build_amazon_url(query="macbook"), storage_path="tests/amazon.json"
+            )
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 
@@ -676,7 +693,7 @@ class ProviderParserFixtureTests(unittest.TestCase):
         html = fixture.read_text(encoding="utf-8", errors="replace")
         url = "https://listado.mercadolibre.com.mx/consolas-videojuegos/test_NoIndex_True"
         with empty_article_storage():
-            motor = MercadoLibre("nintendo", Category.consolas, storage_path="tests/ml-source.json")
+            motor = MercadoLibre("nintendo", url, storage_path="tests/ml-source.json")
 
         items, next_url = motor.scrape_page({"content": html, "url": url})
 
@@ -722,7 +739,11 @@ class ProviderParserFixtureTests(unittest.TestCase):
         }
         html = f"<script id='__NORDIC_RENDERING_CTX__'>_n.ctx.r={json.dumps(state)}</script>"
         with empty_article_storage():
-            motor = MercadoLibre("nintendo", Category.consolas, storage_path="tests/ml-nordic.json")
+            motor = MercadoLibre(
+                "nintendo",
+                build_global_search_url("nintendo", category=Category.consolas),
+                storage_path="tests/ml-nordic.json",
+            )
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 

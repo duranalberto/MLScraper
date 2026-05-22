@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class Liverpool(Motor):
     PROVIDER_KEY = "lv"
 
-    def __init__(self, search_term: str, url: str, *, storage_path: str):
-        super().__init__(search_term, url, storage_path=storage_path)
+    def __init__(self, job_id: str, url: str, *, storage_path: str):
+        super().__init__(job_id, url, storage_path=storage_path)
 
     def scrape_page(self, body: dict):
         items = []
@@ -26,7 +26,7 @@ class Liverpool(Motor):
             logger.error(
                 "[Liverpool] __NEXT_DATA__ script tag missing or empty for '%s'. "
                 "Liverpool may have changed their page structure.",
-                self.search_term,
+                self.job_id,
             )
             return [], None
 
@@ -36,7 +36,7 @@ class Liverpool(Motor):
         except json.JSONDecodeError as e:
             self._scrape_incomplete = True
             logger.error(
-                "[Liverpool] Failed to parse __NEXT_DATA__ JSON for '%s': %s", self.search_term, e
+                "[Liverpool] Failed to parse __NEXT_DATA__ JSON for '%s': %s", self.job_id, e
             )
             return [], None
         except (KeyError, TypeError) as e:
@@ -44,7 +44,7 @@ class Liverpool(Motor):
             logger.error(
                 "[Liverpool] Unexpected JSON structure for '%s' — key %s not found. "
                 "Liverpool may have changed their data schema.",
-                self.search_term,
+                self.job_id,
                 e,
             )
             return [], None
@@ -63,9 +63,7 @@ class Liverpool(Motor):
                     }
                 )
             except (KeyError, TypeError) as e:
-                logger.warning(
-                    "[Liverpool] Skipping malformed record for '%s': %s", self.search_term, e
-                )
+                logger.warning("[Liverpool] Skipping malformed record for '%s': %s", self.job_id, e)
                 continue
 
         try:

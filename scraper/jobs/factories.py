@@ -6,14 +6,21 @@ import re
 import unicodedata
 
 from provider.amazon.motor import Amazon
-from provider.amazon.options import Seller
+from provider.amazon.options import Brand as AmazonBrand
+from provider.amazon.options import Seller as AmazonSeller
+from provider.amazon.urls import build_amazon_url
 from provider.liverpool.motor import Liverpool
 from provider.liverpool.options import Brand as LiverpoolBrand
 from provider.liverpool.options import Page as LiverpoolPage
 from provider.liverpool.urls import build_liverpool_url
 from provider.mercado_libre.motor import MercadoLibre
-from provider.mercado_libre.options import Category
+from provider.mercado_libre.options import Category as MercadoLibreCategory
+from provider.mercado_libre.options import Seller as MercadoLibreSeller
+from provider.mercado_libre.options import State as MercadoLibreState
+from provider.mercado_libre.urls import build_mercado_libre_url
 from provider.palacio_de_hierro.motor import PalacioDeHierro
+from provider.palacio_de_hierro.options import Page as PalacioPage
+from provider.palacio_de_hierro.urls import build_palacio_url
 
 from .registry import MotorRegistry
 
@@ -40,7 +47,7 @@ def _slug(text: str) -> str:
     return f"item-{digest}"
 
 
-def _storage_path(provider: str, search_term: str, qualifier: str = "") -> str:
+def _storage_path(provider: str, job_id: str, qualifier: str = "") -> str:
     """
     Build a relative storage path such as:
         "mercado_libre/zelda-wii.json"
@@ -48,55 +55,94 @@ def _storage_path(provider: str, search_term: str, qualifier: str = "") -> str:
         "amazon/iphone__amazon-mx.json"
         "liverpool/lv-laptops.json"
     """
-    name = _slug(search_term)
+    name = _slug(job_id)
     if qualifier:
         name = f"{name}__{_slug(qualifier)}"
     return f"{provider}/{name}.json"
 
 
 def _ml_factory(
-    search_term: str,
-    category: Category = Category.consolas_videojuegos,
+    job_id: str,
     url: str | None = None,
+    query: str | None = None,
+    seller: MercadoLibreSeller | None = None,
+    category: MercadoLibreCategory | None = None,
+    state: MercadoLibreState | None = None,
     **_,
 ) -> MercadoLibre:
     """
-    Qualifier: category name when it is not the default, otherwise omitted.
+    Mercado Libre jobs use an explicit URL when provided, otherwise they build
+    global or known-seller listing URLs from provider-specific structured fields.
 
     Examples:
-        search_term="zelda wii"                          → mercado_libre/zelda-wii.json
-        search_term="nintendo ds", category=consolas     → mercado_libre/nintendo-ds__consolas.json
-        search_term="nintendo ds", category=videojuegos  → mercado_libre/nintendo-ds__videojuegos.json
+        job_id="zelda wii"                          → mercado_libre/zelda-wii.json
+        job_id="nintendo ds", category=consolas     → mercado_libre/nintendo-ds__consolas.json
     """
-    qualifier = (
-        ""
-        if category == Category.consolas_videojuegos
-        else category.name  # e.g. "consolas", "videojuegos", "deportes_jersey"
-    )
-    path = _storage_path("mercado_libre", search_term, qualifier)
-    return MercadoLibre(search_term, category, url=url, storage_path=path)
+    if url and (query or seller or category or state):
+        logger.warning(
+            "Mercado Libre job %r uses explicit url; ignoring query/seller/category/state "
+            "filters. Remove 'url' to use structured Mercado Libre search fields.",
+            job_id,
+        )
+
+    if not url:
+        url = build_mercado_libre_url(
+            query=query,
+            seller=seller,
+            category=category,
+            state=state,
+        )
+
+    qualifier = "-".join(option.name for option in (seller, category, state) if option is not None)
+    path = _storage_path("mercado_libre", job_id, qualifier)
+    return MercadoLibre(job_id, url, storage_path=path)
 
 
 def _az_factory(
-    search_term: str,
-    seller: Seller = Seller.none,
+    job_id: str,
+    url: str | None = None,
+    query: str | None = None,
+    seller: AmazonSeller = AmazonSeller.none,
+    brand: AmazonBrand | None = None,
     **_,
 ) -> Amazon:
     """
-    Qualifier: seller name when set, otherwise omitted.
+    Amazon jobs use an explicit URL when provided, otherwise they build search
+    URLs from Amazon-specific query and refinement fields.
 
     Examples:
-        search_term="amiibo"                             → amazon/amiibo.json
-        search_term="iphone", seller=amazon_mx           → amazon/iphone__amazon-mx.json
-        search_term="iphone", seller=amazon_remates      → amazon/iphone__amazon-remates.json
+        job_id="amiibo", query="amiibo"                  → amazon/amiibo.json
+        job_id="iphone", query="iphone", seller=amazon_mx
+                                                    → amazon/iphone__amazon-mx.json
+        job_id="UGREEN store", seller=ugreen_group_limited
+                                           → amazon/ugreen-store__ugreen-group-limited.json
+        job_id="apple", query="apple", brand=apple       → amazon/apple__apple.json
     """
-    qualifier = "" if seller == Seller.none else seller.name
-    path = _storage_path("amazon", search_term, qualifier)
-    return Amazon(search_term, seller, storage_path=path)
+    if url and (query or seller != AmazonSeller.none or brand):
+        logger.warning(
+            "Amazon job %r uses explicit url; ignoring query/seller/brand filters. "
+            "Remove 'url' to use structured Amazon search fields.",
+            job_id,
+        )
+
+    if not url:
+        url = build_amazon_url(
+            query=query,
+            seller=seller,
+            brand=brand,
+        )
+
+    qualifier = "-".join(
+        option.name
+        for option in (seller if seller != AmazonSeller.none else None, brand)
+        if option is not None
+    )
+    path = _storage_path("amazon", job_id, qualifier)
+    return Amazon(job_id, url, storage_path=path)
 
 
 def _lv_factory(
-    search_term: str,
+    job_id: str,
     url: str | None = None,
     query: str | None = None,
     page: LiverpoolPage | None = None,
@@ -110,37 +156,58 @@ def _lv_factory(
     as seller.
 
     Example:
-        search_term="LV Laptops"  →  liverpool/lv-laptops.json
+        job_id="LV Laptops"  →  liverpool/lv-laptops.json
     """
     if url and (query or page or category or brand):
         logger.warning(
             "Liverpool job %r uses explicit url; ignoring page/category/query/brand filters. "
             "Remove 'url' to use structured Liverpool search fields.",
-            search_term,
+            job_id,
         )
 
     if not url:
         url = build_liverpool_url(
-            search_term,
             query=query,
             page=page,
             category=category,
             brand=brand,
         )
 
-    path = _storage_path("liverpool", search_term)
-    return Liverpool(search_term, url, storage_path=path)
+    path = _storage_path("liverpool", job_id)
+    return Liverpool(job_id, url, storage_path=path)
 
 
-def _ph_factory(search_term: str, url: str, **_) -> PalacioDeHierro:
+def _ph_factory(
+    job_id: str,
+    url: str | None = None,
+    query: str | None = None,
+    page: PalacioPage | None = None,
+    brands: str | list[str] | tuple[str, ...] | None = None,
+    **_,
+) -> PalacioDeHierro:
     """
-    Same convention as Liverpool.
+    Palacio jobs use an explicit URL when provided, otherwise the URL is
+    generated from Palacio-specific page, brand, or global search fields.
 
     Example:
-        search_term="PH Macbook Air"  →  palacio_de_hierro/ph-macbook-air.json
+        job_id="PH Macbook Air"  →  palacio_de_hierro/ph-macbook-air.json
     """
-    path = _storage_path("palacio_de_hierro", search_term)
-    return PalacioDeHierro(search_term, url, storage_path=path)
+    if url and (query or page or brands):
+        logger.warning(
+            "Palacio job %r uses explicit url; ignoring page/query/brands filters. "
+            "Remove 'url' to use structured Palacio search fields.",
+            job_id,
+        )
+
+    if not url:
+        url = build_palacio_url(
+            query=query,
+            page=page,
+            brands=brands,
+        )
+
+    path = _storage_path("palacio_de_hierro", job_id)
+    return PalacioDeHierro(job_id, url, storage_path=path)
 
 
 def register_default_factories(registry: MotorRegistry) -> None:

@@ -15,8 +15,8 @@ class PalacioDeHierro(Motor):
     PROVIDER_KEY = "ph"
     BASE_DOMAIN = "https://www.elpalaciodehierro.com"
 
-    def __init__(self, search_term: str, url: str, *, storage_path: str):
-        super().__init__(search_term, url, storage_path=storage_path)
+    def __init__(self, job_id: str, url: str, *, storage_path: str):
+        super().__init__(job_id, url, storage_path=storage_path)
 
     def scrape_page(self, body: dict) -> Tuple[List[dict], Optional[str]]:
         soup = BeautifulSoup(body.get("content", ""), "lxml")
@@ -24,7 +24,7 @@ class PalacioDeHierro(Motor):
 
         if not items:
             self._scrape_incomplete = True
-            logger.warning("[PH] No product tiles found for '%s'.", self.search_term)
+            logger.warning("[PH] No product tiles found for '%s'.", self.job_id)
             return [], None
 
         next_url = self._next_url(

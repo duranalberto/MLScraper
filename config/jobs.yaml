@@ -1,7 +1,8 @@
 # Scraping Job Catalogue
 # ──────────────────────
-# Each entry requires a `provider` key that maps to a registered factory.
-# All other keys are provider-specific and forwarded verbatim to the factory.
+# Each entry requires a `provider` key that maps to a registered factory and a
+# provider-local `job_id`. Keep `job_id` stable for storage linkage and unique
+# within that provider; provider-specific keys are forwarded to the factory.
 #
 # Providers
 # ─────────
@@ -10,104 +11,140 @@
 #   lv  →  Liverpool
 #   ph  →  Palacio de Hierro
 #
-# MercadoLibre categories (optional — default: consolas_videojuegos)
-#   none | consolas | videojuegos | consolas_videojuegos | deportes_jersey
-#   iphone_trece_pro_usado | iphone_once_pro_usado | iphone_se_usado | apple_official
+# MercadoLibre structured search fields (optional)
+#   url: explicit URL bypass for unmodeled route shapes
+#   query: global or seller-scoped search text for generated search routes
+#   seller: apple | nintendo
+#   category: computacion | celulares_telefonia | consolas_videojuegos
+#             consolas | videojuegos
+#   state: nuevo | usado
 #
-# Amazon sellers (optional — default: none)
-#   none | amazon_mx | amazon_usa | amazon_remates | buyspry
+# Amazon structured search fields (optional)
+#   url: explicit URL bypass for copied or unmodeled refinements
+#   query: search text for generated search routes; seller-only jobs may omit it
+#   seller: none | amazon_mx | amazon_usa | amazon_remates | buyspry
+#           randu_mx | v_i_v_o | ugreen_group_limited
+#   brand: apple | nintendo
+#
+# Liverpool structured search fields (optional)
+#   url: explicit URL bypass for custom sellers or unmodeled filters
+#   query: seller-filtered search text for generated search routes
+#   page: documented page key or page label
+#   category: legacy alias for page
+#
+# Palacio de Hierro structured search fields (optional)
+#   url: explicit URL bypass for unmodeled route or filter shapes
+#   query: global search text for generated search routes without a page
+#   page: electronica | tablets | computo | laptops | electrodomesticos
+#         linea_blanca | refrigeradores | videojuegos | nintendo | playstation
+#   brands: page-scoped brand string or non-empty brand list
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
   # ── MercadoLibre ──────────────────────────────────────────────────────────
   # - provider: ml
-  #   search_term: fire emblem
-
-  #- provider: ml
-  #  search_term: zelda wii
-
-  - provider: ml
-    search_term: pokemon ds
-    category: consolas
-
-  - provider: ml
-    search_term: nintendo 3ds
-    category: consolas
+  #   job_id: fire emblem
+  #   query: fire emblem
 
   # - provider: ml
-  #   search_term: nintendo ds
+  #   job_id: zelda wii
+  #   query: zelda wii
+
+  # - provider: ml
+  #  job_id: nintendo ds
+  #  query: nintendo 3ds
+  #  category: consolas
+  #  state: usado
+
+  # - provider: ml
+  #   job_id: nintendo switch
+  #   query: nintendo switch
   #   category: consolas
 
   # - provider: ml
-  #   search_term: nintendo switch
-  #   category: consolas
-
-  #- provider: ml
-  #  search_term: lote nintendo
-
-  #- provider: ml
-  #  search_term: atlas
-  #  category: deportes_jersey
+  #   job_id: lote nintendo
+  #   query: lote nintendo
 
   # - provider: ml
-  #   search_term: game cube
+  #   job_id: game cube
+  #   query: game cube
   #   category: consolas
 
   # - provider: ml
-  #   search_term: game cube juegos
+  #   job_id: game cube juegos
+  #   query: game cube juegos
 
   # ── Liverpool ─────────────────────────────────────────────────────────────
-  # Generated Liverpool jobs always filter to Liverpool as seller.
-  #
-  # Global seller-filtered search:
   - provider: lv
-    search_term: Ventilador Liverpool
+    job_id: Ventilador Liverpool
     query: ventilador
-  #
-  # Page-only seller-filtered URL resolved from the documented catalogue:
+
   - provider: lv
-    search_term: Hornos eléctricos
+    job_id: Hornos eléctricos
     page: hornos_electricos
-  #
-  # Page + query keeps both the Liverpool seller and page refinements:
+
   - provider: lv
-    search_term: Hornos eléctricos Black
+    job_id: Hornos eléctricos Breville
     page: Hornos eléctricos
     query: breville
 
   - provider: lv
-    search_term: Apple
+    job_id: Apple
     page: Apple
 
-  # Legacy `category` is accepted as an alias for `page`:
   - provider: lv
-    search_term: Juegos Nintendo catálogo
+    job_id: Juegos Nintendo catálogo
     category: juegos_nintendo
 
   # ── Palacio de Hierro ──────────────────────────────────────────────────────
   - provider: ph
-    search_term: Macbook
-    url: "https://www.elpalaciodehierro.com/buscar?q=macbook"
+    job_id: Macbook
+    query: macbook
 
   - provider: ph
-    search_term: Apple
-    url: "https://www.elpalaciodehierro.com/buscar?q=apple"
+    job_id: Apple
+    query: apple
+
+  - provider: ph
+    job_id: Computadoras Apple
+    page: computo
+    brands:
+      - apple
+
+  - provider: ph
+    job_id: Electrodomesticos
+    page: electrodomesticos
+
+  - provider: ph
+    job_id: Linea Blanca
+    page: linea_blanca
+
+  - provider: ph
+    job_id: Videojuegos
+    page: videojuegos
 
   # ── Amazon ────────────────────────────────────────────────────────────────
   - provider: az
-    search_term: macbook
+    job_id: macbook
+    query: macbook
     seller: amazon_mx
+    brand: apple
 
   - provider: az
-    search_term: mac studio
+    job_id: mac studio
+    query: mac studio
     seller: amazon_mx
+    brand: apple
 
-  # Uncomment to activate:
-  # - provider: az
-  #   search_term: pokemon tcg
-  #   seller: amazon_mx
+  - provider: az
+    job_id: Randu MX catalogue
+    seller: randu_mx
 
-  # - provider: az
-  #   search_term: iphone
-  #   seller: amazon_remates
+  - provider: az
+    job_id: V-I-V-O catalogue
+    seller: v_i_v_o
+
+  - provider: az
+    job_id: UGREEN GROUP LIMITED catalogue
+    seller: ugreen_group_limited

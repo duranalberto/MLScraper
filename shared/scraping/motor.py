@@ -51,12 +51,12 @@ class Motor(ABC):
 
     def __init__(
         self,
-        search_term: str,
+        job_id: str,
         url: str,
         storage_path: str,
         debug: bool = True,
     ) -> None:
-        self.search_term = search_term
+        self.job_id = job_id
         self.url = url
         self.storage_path = storage_path
         self.active = Stream(Status.active)
@@ -154,7 +154,7 @@ class Motor(ABC):
             if self.debug:
                 logger.warning(
                     "Skipping '%s' until %s after a temporary block.",
-                    self.search_term,
+                    self.job_id,
                     self.blocked_until,
                 )
             return
@@ -164,7 +164,7 @@ class Motor(ABC):
             if caller and self.is_first_run and not silent:
                 logger.info(
                     "%-35s | first run: Telegram notifications will be skipped",
-                    self.search_term,
+                    self.job_id,
                 )
 
             if self.FRESH_SESSION_PER_PAGE:
@@ -181,7 +181,7 @@ class Motor(ABC):
                         )
 
         except Exception:
-            logger.error("Scrape for '%s' crashed:\n%s", self.search_term, format_exc())
+            logger.error("Scrape for '%s' crashed:\n%s", self.job_id, format_exc())
             return
 
         if results or self.active.get_list() or self.on_hold.get_list():
@@ -190,7 +190,7 @@ class Motor(ABC):
             elif self.debug:
                 logger.warning(
                     "Skipping missing-item reconciliation for '%s' because the scrape did not complete.",
-                    self.search_term,
+                    self.job_id,
                 )
 
             await self.save_to_file()
@@ -199,7 +199,7 @@ class Motor(ABC):
             if not silent:
                 logger.info(
                     "%-35s | total recorded: %d",
-                    self.search_term,
+                    self.job_id,
                     len(results),
                 )
 
@@ -242,7 +242,7 @@ class Motor(ABC):
                 logger.warning(
                     "Failed to fetch '%s' for '%s'",
                     current_url,
-                    self.search_term,
+                    self.job_id,
                 )
             return None
 
@@ -260,7 +260,7 @@ class Motor(ABC):
         if not silent:
             logger.info(
                 "%-35s | found: %3d | next: %s",
-                self.search_term,
+                self.job_id,
                 len(items),
                 "yes" if next_url else "no",
             )
@@ -272,7 +272,7 @@ class Motor(ABC):
                 self.mark_blocked("empty_paginated_page", cooldown)
             logger.warning(
                 "Empty result page for '%s' at %s with a next page present; stopping pagination.",
-                self.search_term,
+                self.job_id,
                 current_url,
             )
             return None
@@ -336,17 +336,16 @@ class Motor(ABC):
 
     def _article_payload(self, article: Article) -> dict:
         """
-        Enrich the article dump with motor-level context (search_term)
-        for outbound notifications.  search_term lives here, not in the
-        stored JSON.
+        Enrich the article dump with motor-level context (job_id)
+        for outbound notifications. job_id lives here, not in stored JSON.
         """
         payload = article.dump()
-        payload["search_term"] = self.search_term
+        payload["job_id"] = self.job_id
         return payload
 
     def print_compare(self) -> None:
         logger.info("")
-        logger.info("Summary for: %s", self.search_term)
+        logger.info("Summary for: %s", self.job_id)
         logger.info("  Storage path:      %s", self.storage_path)
         logger.info("  Total in storage:  %d", len(self.get_all()))
         logger.info("  Currently active:  %d", len(self.active))

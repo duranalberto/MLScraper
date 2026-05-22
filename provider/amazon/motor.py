@@ -1,20 +1,21 @@
+"""Amazon Mexico scraper motor."""
+
 import re
 import urllib.parse
+
 from bs4 import BeautifulSoup
 from shared.scraping.motor import Motor
 
-from .options import Seller
-
 
 class Amazon(Motor):
+    """Scrape Amazon Mexico search result pages."""
+
     PROVIDER_KEY = "az"
     DOMAIN = "https://www.amazon.com.mx"
 
-    def __init__(self, search_term: str, seller: Seller = Seller.none, *, storage_path: str):
-        self.search_term = search_term
-        formatted_query = urllib.parse.quote_plus(search_term.lower())
-        url = f"{self.DOMAIN}/s?k={formatted_query}{seller.filter_query}"
-        super().__init__(search_term, url, storage_path=storage_path)
+    def __init__(self, job_id: str, url: str, *, storage_path: str):
+        """Create an Amazon motor for a generated or explicit result URL."""
+        super().__init__(job_id, url, storage_path=storage_path)
 
     def scrape_page(self, body: dict):
         items = []

@@ -8,7 +8,16 @@
     "EDITOR": "code --wait",
     "VISUAL": "code --wait"
   },
-  "postCreateCommand": "git config --global core.editor 'code --wait'",
+  "forwardPorts": [
+    80
+  ],
+  "portsAttributes": {
+    "80": {
+      "label": "MLScraper FastAPI",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "git config --global core.editor 'code --wait' && git config --global --add safe.directory /workspaces/MLScraper && if [ -d .git ]; then pre-commit install; fi",
   "customizations": {
     "vscode": {
       "settings": {

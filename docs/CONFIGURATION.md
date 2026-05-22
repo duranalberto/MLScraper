@@ -10,12 +10,27 @@ Defines the active scraping catalogue under a top-level `jobs` list.
 Every job requires:
 
 - `provider`: one of `ml`, `az`, `lv`, or `ph`.
-- `search_term`: human-readable label used for scraping and storage naming.
+- `job_id`: stable provider-local job identifier used for runtime labelling and
+  storage naming. Keep the value stable to keep the same data source.
+
+`job_id` must be unique within each provider. The same value can be reused by
+different providers, such as one `Apple` job for Liverpool and one for Palacio,
+but a provider cannot define two `Apple` jobs.
 
 Provider-specific fields:
 
-- Mercado Libre (`ml`): optional `category`, optional `url`.
-- Amazon (`az`): optional `seller`.
+- Mercado Libre (`ml`): optional `url`, optional global or seller-scoped
+  `query`, optional known `seller`, optional documented `category`, and optional
+  `state` (`nuevo` or `usado`). Generated global searches require `query`.
+  Known seller jobs can list all products, add a query,
+  or use documented category routes. Store `state` filters require a category
+  route in generated jobs; use explicit `url` for unmodeled Mercado Libre
+  routes.
+- Amazon (`az`): optional `url`, optional search `query`, optional known
+  `seller`, and optional documented singular `brand`. Generated search text
+  comes from `query`; refinement-only jobs can omit it when `seller` or `brand`
+  already form the URL. Explicit `url` is used unchanged for unmodeled
+  refinements or copied browser URLs.
 - Liverpool (`lv`): optional `url`, optional `query`, optional Liverpool
   `page`. Generated URLs resolve Liverpool's seller filter at job creation.
   Page + query jobs use the root `N-` token route so Liverpool preserves both
@@ -23,10 +38,18 @@ Provider-specific fields:
   Legacy `category` is accepted as an alias for `page`. Explicit `url` is the
   only bypass and is used unchanged, including custom sellers or unmodeled
   filter combinations.
-- Palacio de Hierro (`ph`): required `url`.
+- Palacio de Hierro (`ph`): optional `url`, optional global search `query`,
+  optional Palacio `page`, and optional page-scoped `brands`. Generated global
+  searches require `query`. Generated brand filters require a page route.
+  Explicit `url` is used unchanged for unmodeled route or filter combinations.
 
 Use `config/jobs.yaml.example` as a safe starting template.
+See [Amazon](AMAZON.md) for the initial seller/Marca catalogue and URL rules.
+See [Mercado Libre](MERCADO_LIBRE.md) for the initial seller/category catalogue
+and URL rules.
 See [Liverpool](LIVERPOOL.md) for the page catalogue and URL validation notes.
+See [Palacio de Hierro](PALACIO_DE_HIERRO.md) for generated page and search URL
+rules.
 
 ## `config/motors.yaml`
 

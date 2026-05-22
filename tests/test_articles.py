@@ -68,12 +68,12 @@ class ArticleTests(unittest.TestCase):
 
         self.assertEqual([history.status for history in article.status_history], [Status.finished])
 
-    def test_dump_omits_search_term_and_optional_empty_fields(self) -> None:
+    def test_dump_omits_job_id_and_optional_empty_fields(self) -> None:
         article = Article("item", "Title", 100.0)
 
         dumped = article.dump()
 
-        self.assertNotIn("search_term", dumped)
+        self.assertNotIn("job_id", dumped)
         self.assertNotIn("history", dumped)
         self.assertNotIn("hold_misses", dumped)
 

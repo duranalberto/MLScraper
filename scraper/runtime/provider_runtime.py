@@ -94,7 +94,7 @@ async def scrape_with_limit(
     except Exception:
         logger.exception(
             "Motor '%s' (%s) failed during scrape; continuing with the remaining motors.",
-            motor.search_term,
+            motor.job_id,
             provider,
         )
     finally:

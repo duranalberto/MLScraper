@@ -86,7 +86,10 @@ More detail:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Data Model](docs/DATA_MODEL.md)
+- [Amazon](docs/AMAZON.md)
+- [Mercado Libre](docs/MERCADO_LIBRE.md)
 - [Liverpool](docs/LIVERPOOL.md)
+- [Palacio de Hierro](docs/PALACIO_DE_HIERRO.md)
 - [Testing](docs/TESTING.md)
 - [Adding a Provider](docs/ADDING_PROVIDER.md)
 - [Operations](docs/OPERATIONS.md)

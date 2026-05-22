@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from provider.amazon.options import Brand as AmazonBrand
 from provider.amazon.options import Seller
 from provider.liverpool import urls as lv_urls
 from provider.liverpool.options import (
@@ -13,6 +14,9 @@ from provider.liverpool.options import (
 )
 from provider.liverpool.options import Page as LiverpoolPage
 from provider.mercado_libre.options import Category
+from provider.mercado_libre.options import Seller as MercadoLibreSeller
+from provider.mercado_libre.options import State
+from provider.palacio_de_hierro.options import Page as PalacioPage
 from scraper.jobs import factories
 from scraper.jobs.loader import load_jobs
 from scraper.jobs.registry import MotorRegistry
@@ -31,26 +35,36 @@ class JobLoaderTests(unittest.TestCase):
         path = self._write_jobs("""
 jobs:
   - provider: ml
-    search_term: " pokemon ds "
+    job_id: " pokemon ds "
     category: consolas
+    seller: nintendo
+    state: usado
     custom: passthrough
   - provider: az
-    search_term: macbook
+    job_id: macbook
     seller: amazon_mx
+    brand: apple
+  - provider: az
+    job_id: ugreen
+    seller: ugreen_group_limited
 """)
 
         jobs = load_jobs(path)
 
-        self.assertEqual(jobs[0]["search_term"], "pokemon ds")
+        self.assertEqual(jobs[0]["job_id"], "pokemon ds")
         self.assertEqual(jobs[0]["category"], Category.consolas)
+        self.assertEqual(jobs[0]["seller"], MercadoLibreSeller.nintendo)
+        self.assertEqual(jobs[0]["state"], State.usado)
         self.assertEqual(jobs[0]["custom"], "passthrough")
         self.assertEqual(jobs[1]["seller"], Seller.amazon_mx)
+        self.assertEqual(jobs[1]["brand"], AmazonBrand.apple)
+        self.assertEqual(jobs[2]["seller"], Seller.ugreen_group_limited)
 
     def test_load_jobs_coerces_liverpool_page_and_ignores_seller(self) -> None:
         path = self._write_jobs("""
 jobs:
   - provider: lv
-    search_term: Hornos eléctricos Black
+    job_id: Hornos eléctricos Black
     query: black
     page: Hornos eléctricos
     seller: unsupported
@@ -67,7 +81,7 @@ jobs:
         path = self._write_jobs("""
 jobs:
   - provider: lv
-    search_term: Juegos Nintendo
+    job_id: Juegos Nintendo
     category: juegos_nintendo
 """)
 
@@ -82,43 +96,88 @@ jobs:
   - not-a-mapping
   - provider: ml
   - provider: ml
-    search_term: valid
+    job_id: valid
     category: unknown
   - provider: ph
-    search_term: missing url
+    job_id: invalid page
+    page: missing
   - provider: lv
-    search_term: ok
+    job_id: ok
     url: https://example.test/list
 """)
 
         jobs = load_jobs(path)
 
         self.assertEqual(
-            jobs, [{"provider": "lv", "search_term": "ok", "url": "https://example.test/list"}]
+            jobs, [{"provider": "lv", "job_id": "ok", "url": "https://example.test/list"}]
         )
+
+    def test_load_jobs_skips_unknown_amazon_brand(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: az
+    job_id: bad brand
+    brand: missing
+""")
+
+        self.assertEqual(load_jobs(path), [])
+
+    def test_load_jobs_coerces_palacio_pages_and_brands_without_url(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: ph
+    job_id: Computadoras Apple Asus
+    page: Cómputo
+    brands:
+      - asus
+      - apple
+  - provider: ph
+    job_id: Magic Keyboard
+    query: magic keyboard
+""")
+
+        jobs = load_jobs(path)
+
+        self.assertEqual(jobs[0]["page"], PalacioPage.computo)
+        self.assertEqual(jobs[0]["brands"], ["asus", "apple"])
+        self.assertEqual(
+            jobs[1],
+            {"provider": "ph", "job_id": "Magic Keyboard", "query": "magic keyboard"},
+        )
+
+    def test_load_jobs_skips_invalid_palacio_brands(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: ph
+    job_id: bad brand
+    page: computo
+    brands:
+      - apple
+      - 15
+""")
+
+        self.assertEqual(load_jobs(path), [])
 
     def test_load_jobs_skips_unknown_liverpool_page_names(self) -> None:
         path = self._write_jobs("""
 jobs:
   - provider: lv
-    search_term: bad
+    job_id: bad
     page: missing
   - provider: lv
-    search_term: good
+    job_id: good
     page: Apple
 """)
 
         jobs = load_jobs(path)
 
-        self.assertEqual(
-            jobs, [{"provider": "lv", "search_term": "good", "page": LiverpoolPage.apple}]
-        )
+        self.assertEqual(jobs, [{"provider": "lv", "job_id": "good", "page": LiverpoolPage.apple}])
 
     def test_load_jobs_skips_conflicting_liverpool_page_and_category(self) -> None:
         path = self._write_jobs("""
 jobs:
   - provider: lv
-    search_term: conflict
+    job_id: conflict
     page: laptops
     category: tablets
 """)
@@ -137,6 +196,59 @@ jobs:
             load_jobs(missing_jobs_path)
         with self.assertRaisesRegex(ValueError, "must be a list"):
             load_jobs(non_list_path)
+
+    def test_load_jobs_rejects_legacy_search_term_entries(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: az
+    search_term: macbook
+    query: macbook
+""")
+
+        with self.assertLogs("scraper.jobs.loader", level="WARNING") as logs:
+            jobs = load_jobs(path)
+
+        self.assertEqual(jobs, [])
+        self.assertIn("legacy 'search_term'", "\n".join(logs.output))
+
+    def test_load_jobs_skips_blank_job_id(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: az
+    job_id: "   "
+    query: macbook
+""")
+
+        self.assertEqual(load_jobs(path), [])
+
+    def test_load_jobs_rejects_duplicate_provider_job_ids(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: az
+    job_id: apple
+    query: apple
+  - provider: az
+    job_id: apple
+    seller: amazon_mx
+""")
+
+        with self.assertRaisesRegex(ValueError, "provider='az'.*job_id='apple'"):
+            load_jobs(path)
+
+    def test_load_jobs_allows_same_job_id_across_providers(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: lv
+    job_id: Apple
+    url: https://example.test/lv
+  - provider: ph
+    job_id: Apple
+    url: https://example.test/ph
+""")
+
+        jobs = load_jobs(path)
+
+        self.assertEqual([job["provider"] for job in jobs], ["lv", "ph"])
 
 
 class FactoryTests(unittest.TestCase):
@@ -200,10 +312,15 @@ class FactoryTests(unittest.TestCase):
         factories.register_default_factories(registry)
         registry.register_many(
             [
-                {"provider": "ml", "search_term": "Nintendo DS", "category": Category.videojuegos},
-                {"provider": "az", "search_term": "iPhone", "seller": Seller.amazon_mx},
-                {"provider": "lv", "search_term": "LV Laptops", "url": "https://example.test/lv"},
-                {"provider": "ph", "search_term": "PH Apple", "url": "https://example.test/ph"},
+                {
+                    "provider": "ml",
+                    "job_id": "Nintendo DS",
+                    "query": "Nintendo DS",
+                    "category": Category.videojuegos,
+                },
+                {"provider": "az", "job_id": "iPhone", "seller": Seller.amazon_mx},
+                {"provider": "lv", "job_id": "LV Laptops", "url": "https://example.test/lv"},
+                {"provider": "ph", "job_id": "PH Apple", "url": "https://example.test/ph"},
             ]
         )
 
@@ -220,9 +337,121 @@ class FactoryTests(unittest.TestCase):
             ],
         )
 
+    def test_mercado_libre_factory_generates_global_urls_and_storage_variants(self) -> None:
+        with empty_article_storage():
+            plain_motor = factories._ml_factory("Nintendo 3DS", query="Nintendo 3DS")
+            used_motor = factories._ml_factory(
+                "Nintendo 3DS",
+                query="Nintendo 3DS",
+                category=Category.consolas_videojuegos,
+                state=State.usado,
+            )
+
+        self.assertEqual(
+            plain_motor.url,
+            "https://listado.mercadolibre.com.mx/nintendo-3ds_NoIndex_True",
+        )
+        self.assertEqual(plain_motor.storage_path, "mercado_libre/nintendo-3ds.json")
+        self.assertEqual(
+            used_motor.url,
+            "https://listado.mercadolibre.com.mx/"
+            "consolas-videojuegos/usado/nintendo-3ds_NoIndex_True",
+        )
+        self.assertEqual(
+            used_motor.storage_path,
+            "mercado_libre/nintendo-3ds__consolas-videojuegos-usado.json",
+        )
+
+    def test_mercado_libre_factory_generates_known_store_url(self) -> None:
+        with empty_article_storage():
+            motor = factories._ml_factory(
+                "Nintendo Videojuegos",
+                seller=MercadoLibreSeller.nintendo,
+                category=Category.videojuegos,
+            )
+
+        self.assertEqual(
+            motor.url,
+            "https://listado.mercadolibre.com.mx/"
+            "tienda/nintendo/listado/consolas-videojuegos/videojuegos/",
+        )
+        self.assertEqual(
+            motor.storage_path,
+            "mercado_libre/nintendo-videojuegos__nintendo-videojuegos.json",
+        )
+
+    def test_mercado_libre_factory_explicit_url_wins_over_filters(self) -> None:
+        with empty_article_storage():
+            with self.assertLogs("scraper.jobs.factories", level="WARNING") as logs:
+                motor = factories._ml_factory(
+                    "Custom Mercado",
+                    url="https://example.test/custom",
+                    query="ignored",
+                    seller=MercadoLibreSeller.apple,
+                    category=Category.computacion,
+                    state=State.nuevo,
+                )
+
+        self.assertEqual(motor.url, "https://example.test/custom")
+        self.assertIn("ignoring query/seller/category/state", "\n".join(logs.output))
+
+    def test_amazon_factory_generates_filter_urls_and_storage_variants(self) -> None:
+        with empty_article_storage():
+            seller_motor = factories._az_factory("Apple", query="apple", seller=Seller.amazon_mx)
+            brand_motor = factories._az_factory("Apple", query="apple", brand=AmazonBrand.apple)
+            combined_motor = factories._az_factory(
+                "Apple",
+                query="apple",
+                seller=Seller.amazon_mx,
+                brand=AmazonBrand.apple,
+            )
+            catalogue_motor = factories._az_factory(
+                "UGREEN catalogue",
+                seller=Seller.ugreen_group_limited,
+            )
+
+        self.assertEqual(
+            seller_motor.url,
+            "https://www.amazon.com.mx/s?k=apple&rh=p_6%3AAVDBXBAVVSXLQ",
+        )
+        self.assertEqual(seller_motor.storage_path, "amazon/apple__amazon-mx.json")
+        self.assertEqual(
+            brand_motor.url,
+            "https://www.amazon.com.mx/s?k=apple&rh=p_123%3A110955",
+        )
+        self.assertEqual(brand_motor.storage_path, "amazon/apple__apple.json")
+        self.assertEqual(
+            combined_motor.url,
+            "https://www.amazon.com.mx/s?k=apple&rh=" "p_6%3AAVDBXBAVVSXLQ%2Cp_123%3A110955",
+        )
+        self.assertEqual(combined_motor.storage_path, "amazon/apple__amazon-mx-apple.json")
+        self.assertEqual(
+            catalogue_motor.url,
+            "https://www.amazon.com.mx/s?rh=p_6%3AAKXVBT49GGF3B",
+        )
+        self.assertEqual(
+            catalogue_motor.storage_path,
+            "amazon/ugreen-catalogue__ugreen-group-limited.json",
+        )
+
+    def test_amazon_factory_explicit_url_wins_over_filters(self) -> None:
+        with empty_article_storage():
+            with self.assertLogs("scraper.jobs.factories", level="WARNING") as logs:
+                motor = factories._az_factory(
+                    "Custom",
+                    url="https://example.test/custom",
+                    query="ignored",
+                    seller=Seller.amazon_mx,
+                    brand=AmazonBrand.apple,
+                )
+
+        self.assertEqual(motor.url, "https://example.test/custom")
+        self.assertIn("ignoring query/seller/brand", "\n".join(logs.output))
+
     def test_liverpool_factory_generates_url_without_explicit_url(self) -> None:
-        with empty_article_storage(), self._mock_liverpool_resolver(
-            "N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=ventilador"
+        with (
+            empty_article_storage(),
+            self._mock_liverpool_resolver("N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=ventilador"),
         ):
             motor = factories._lv_factory("Ventilador Liverpool", query="ventilador")
 
@@ -254,9 +483,12 @@ class FactoryTests(unittest.TestCase):
     def test_liverpool_factory_generates_seller_filtered_page_query(
         self,
     ) -> None:
-        with empty_article_storage(), self._mock_liverpool_resolver(
-            "N-S1sLjNksKoG%2BC2c1SDPsHDLkL1UcSQDvtOqhAagDbUKyQ4wGi88mGsyxG1aD%2B3uQ",
-            LiverpoolPage.hornos_electricos,
+        with (
+            empty_article_storage(),
+            self._mock_liverpool_resolver(
+                "N-S1sLjNksKoG%2BC2c1SDPsHDLkL1UcSQDvtOqhAagDbUKyQ4wGi88mGsyxG1aD%2B3uQ",
+                LiverpoolPage.hornos_electricos,
+            ),
         ):
             motor = factories._lv_factory(
                 "Hornos eléctricos Black",
@@ -271,9 +503,12 @@ class FactoryTests(unittest.TestCase):
         )
 
     def test_liverpool_factory_generates_landing_page_seller_url(self) -> None:
-        with empty_article_storage(), self._mock_liverpool_resolver(
-            "N-S1sLjNksKoG%2BC2c1SDPsHN%2BJ%2BVnTTvZIur1XfBh58ds%3D",
-            LiverpoolPage.computacion,
+        with (
+            empty_article_storage(),
+            self._mock_liverpool_resolver(
+                "N-S1sLjNksKoG%2BC2c1SDPsHN%2BJ%2BVnTTvZIur1XfBh58ds%3D",
+                LiverpoolPage.computacion,
+            ),
         ):
             motor = factories._lv_factory("Computación", page=LiverpoolPage.computacion)
 
@@ -283,40 +518,77 @@ class FactoryTests(unittest.TestCase):
             "N-S1sLjNksKoG%2BC2c1SDPsHN%2BJ%2BVnTTvZIur1XfBh58ds%3D",
         )
 
+    def test_palacio_factory_generates_search_url_without_explicit_url(self) -> None:
+        with empty_article_storage():
+            motor = factories._ph_factory("Magic Keyboard", query="magic keyboard")
+
+        self.assertEqual(motor.storage_path, "palacio_de_hierro/magic-keyboard.json")
+        self.assertEqual(
+            motor.url,
+            "https://www.elpalaciodehierro.com/buscar?q=magic-keyboard",
+        )
+
+    def test_palacio_factory_generates_page_url_with_brand_filters(self) -> None:
+        with empty_article_storage():
+            motor = factories._ph_factory(
+                "Computadoras Apple Asus",
+                page=PalacioPage.computo,
+                brands=["asus", "apple"],
+            )
+
+        self.assertEqual(
+            motor.url,
+            "https://www.elpalaciodehierro.com/electronica/computadoras/apple%7Casus/",
+        )
+
+    def test_palacio_factory_explicit_url_wins_over_filters(self) -> None:
+        with empty_article_storage():
+            with self.assertLogs("scraper.jobs.factories", level="WARNING") as logs:
+                motor = factories._ph_factory(
+                    "Custom",
+                    url="https://example.test/custom",
+                    query="ignored",
+                    page=PalacioPage.computo,
+                    brands=["apple"],
+                )
+
+        self.assertEqual(motor.url, "https://example.test/custom")
+        self.assertIn("ignoring page/query/brands", "\n".join(logs.output))
+
 
 class MotorRegistryTests(unittest.TestCase):
     def test_register_requires_provider_key(self) -> None:
         registry = MotorRegistry()
 
         with self.assertRaisesRegex(ValueError, "provider"):
-            registry.register({"search_term": "missing"})
+            registry.register({"job_id": "missing"})
 
     def test_build_skips_unknown_provider_and_factory_errors(self) -> None:
         registry = MotorRegistry()
-        registry.factory("ok")(lambda search_term: {"search_term": search_term})  # type: ignore[return-value]
+        registry.factory("ok")(lambda job_id: {"job_id": job_id})  # type: ignore[return-value]
 
-        def failing_factory(search_term: str) -> object:
+        def failing_factory(job_id: str) -> object:
             raise RuntimeError("boom")
 
         registry.factory("bad")(failing_factory)  # type: ignore[arg-type]
         registry.register_many(
             [
-                {"provider": "missing", "search_term": "skip"},
-                {"provider": "bad", "search_term": "skip"},
-                {"provider": "ok", "search_term": "keep"},
+                {"provider": "missing", "job_id": "skip"},
+                {"provider": "bad", "job_id": "skip"},
+                {"provider": "ok", "job_id": "keep"},
             ]
         )
 
         motors = registry.build()
 
-        self.assertEqual(motors, [{"search_term": "keep"}])
+        self.assertEqual(motors, [{"job_id": "keep"}])
 
     def test_clear_entries_preserves_factories(self) -> None:
         registry = MotorRegistry()
-        registry.factory("ok")(lambda search_term: {"search_term": search_term})  # type: ignore[return-value]
-        registry.register({"provider": "ok", "search_term": "one"})
+        registry.factory("ok")(lambda job_id: {"job_id": job_id})  # type: ignore[return-value]
+        registry.register({"provider": "ok", "job_id": "one"})
         registry.clear_entries()
-        registry.register({"provider": "ok", "search_term": "two"})
+        registry.register({"provider": "ok", "job_id": "two"})
 
         self.assertEqual(registry.providers, ["ok"])
-        self.assertEqual(registry.build(), [{"search_term": "two"}])
+        self.assertEqual(registry.build(), [{"job_id": "two"}])

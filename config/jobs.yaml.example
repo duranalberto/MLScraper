@@ -1,44 +1,102 @@
 # Safe scraping job catalogue template.
 # Copy selected entries into config/jobs.yaml and edit values for your use case.
+# Every entry needs a provider-local `job_id`; keep it stable and unique within
+# that provider so it continues to identify the same persisted job data.
 
 jobs:
-  # Mercado Libre
+  # `job_id` is stable provider-local identity; `query` is search text.
   - provider: ml
-    search_term: nintendo 3ds
-    category: consolas
+    job_id: nintendo 3ds
+    query: nintendo 3ds
+    category: consolas_videojuegos
+    state: usado
 
-  # Amazon Mexico
+  # Known Mercado Libre seller stores can be searched by query.
+  - provider: ml
+    job_id: Apple iPad Pro
+    seller: apple
+    query: ipad pro 13
+
+  # Seller category routes use the documented seller and category catalogues.
+  - provider: ml
+    job_id: Nintendo videojuegos
+    seller: nintendo
+    category: videojuegos
+
+  # Explicit Mercado Libre URLs are used unchanged for unmodeled route shapes.
+  - provider: ml
+    job_id: Mercado Libre custom route
+    url: "https://listado.mercadolibre.com.mx/custom-route"
+
+  # Amazon searches can filter by seller.
   - provider: az
-    search_term: macbook
+    job_id: Macbook Amazon Mexico
+    query: macbook
     seller: amazon_mx
+
+  # Seller catalogue jobs omit `query`.
+  - provider: az
+    job_id: UGREEN seller catalogue
+    seller: ugreen_group_limited
+
+  # Amazon Marca filters use a documented singular `brand` key.
+  - provider: az
+    job_id: Nintendo Switch 2
+    query: nintendo switch 2
+    brand: nintendo
+
+  # Seller and Marca refinements can be combined with a query.
+  - provider: az
+    job_id: Apple Amazon Mexico
+    query: apple
+    seller: amazon_mx
+    brand: apple
+
+  # Explicit Amazon URLs preserve copied search refinements unchanged.
+  - provider: az
+    job_id: Amazon custom filters
+    url: "https://www.amazon.com.mx/s?k=apple&rh=p_123%3A110955&dc"
 
   # Liverpool global searches always filter to Liverpool as seller.
   - provider: lv
-    search_term: Ventilador Liverpool
+    job_id: Ventilador Liverpool
     query: ventilador
 
   # Liverpool page jobs resolve seller-filtered URLs from documented metadata.
   - provider: lv
-    search_term: Hornos eléctricos
+    job_id: Hornos eléctricos
     page: hornos_electricos
 
   # Page + query keeps both the page and Liverpool seller refinements.
   - provider: lv
-    search_term: Hornos eléctricos Black
+    job_id: Hornos eléctricos Black
     page: Hornos eléctricos
     query: black
 
   # Legacy `category` is accepted as an alias for `page`.
   - provider: lv
-    search_term: Juegos Nintendo
+    job_id: Juegos Nintendo
     category: juegos_nintendo
 
   # Explicit Liverpool URLs are the only bypass. They are used unchanged.
   - provider: lv
-    search_term: Laptops custom filters
+    job_id: Laptops custom filters
     url: "https://www.liverpool.com.mx/tienda/laptops/N-..."
 
-  # Palacio de Hierro requires an explicit URL.
+  # Palacio global search jobs use an explicit `query`.
   - provider: ph
-    search_term: Macbook
-    url: "https://www.elpalaciodehierro.com/buscar?q=macbook"
+    job_id: Macbook
+    query: macbook
+
+  # Palacio page routes can add one or more alphabetized brand filters.
+  - provider: ph
+    job_id: Computadoras Apple Asus
+    page: computo
+    brands:
+      - apple
+      - asus
+
+  # Explicit Palacio URLs are used unchanged for unmodeled routes or filters.
+  - provider: ph
+    job_id: Palacio custom filters
+    url: "https://www.elpalaciodehierro.com/electronica/computadoras/apple/"

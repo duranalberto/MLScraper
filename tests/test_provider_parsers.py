@@ -7,7 +7,9 @@ from unittest.mock import patch
 from bs4 import BeautifulSoup
 
 from provider.amazon.motor import Amazon
-from provider.amazon.options import Seller
+from provider.amazon.options import Brand as AmazonBrand
+from provider.amazon.options import Seller as AmazonSeller
+from provider.amazon.urls import build_amazon_url, build_search_url, preview_amazon_url
 from provider.liverpool import urls as lv_urls
 from provider.liverpool.motor import Liverpool
 from provider.liverpool.options import (
@@ -27,9 +29,85 @@ from provider.liverpool.urls import (
 )
 from provider.mercado_libre import parser as ml_parser
 from provider.mercado_libre.options import Category
-from provider.mercado_libre.urls import construct_search_url, get_identifier
+from provider.mercado_libre.options import Seller as MercadoLibreSeller
+from provider.mercado_libre.options import State
+from provider.mercado_libre.urls import (
+    build_global_search_url,
+    build_mercado_libre_url,
+    build_store_url,
+    get_identifier,
+    preview_mercado_libre_url,
+)
 from provider.palacio_de_hierro.motor import PalacioDeHierro
+from provider.palacio_de_hierro.options import Page as PalacioPage
+from provider.palacio_de_hierro.options import resolve_page as resolve_palacio_page
+from provider.palacio_de_hierro.urls import (
+    build_page_url as build_palacio_page_url,
+    build_palacio_url,
+    build_search_url as build_palacio_search_url,
+    preview_palacio_url,
+)
 from tests.helpers import empty_article_storage
+
+
+class AmazonUrlTests(unittest.TestCase):
+    def test_generated_search_urls_follow_documented_refinement_shapes(self) -> None:
+        self.assertEqual(
+            build_amazon_url(query="MacBook Air"),
+            "https://www.amazon.com.mx/s?k=macbook+air",
+        )
+        self.assertEqual(
+            build_amazon_url(query="Apple"),
+            "https://www.amazon.com.mx/s?k=apple",
+        )
+        self.assertEqual(
+            build_search_url("Apple", seller=AmazonSeller.amazon_mx),
+            "https://www.amazon.com.mx/s?k=apple&rh=p_6%3AAVDBXBAVVSXLQ",
+        )
+        new_sellers = {
+            "randu_mx": "A38E0DZZJWNMAA",
+            "v_i_v_o": "AX105E1SOBX1B",
+            "ugreen_group_limited": "AKXVBT49GGF3B",
+        }
+        for seller, identifier in new_sellers.items():
+            with self.subTest(seller=seller):
+                self.assertEqual(
+                    build_amazon_url(seller=seller),
+                    "https://www.amazon.com.mx/s?rh=p_6%3A" + identifier,
+                )
+        self.assertEqual(
+            build_search_url("Apple", brand=AmazonBrand.apple),
+            "https://www.amazon.com.mx/s?k=apple&rh=p_123%3A110955",
+        )
+        self.assertEqual(
+            build_search_url("Nintendo Switch 2", brand=AmazonBrand.nintendo),
+            "https://www.amazon.com.mx/s?k=nintendo+switch+2&rh=p_123%3A218247",
+        )
+        self.assertEqual(
+            build_search_url("Apple", seller="amazon_mx", brand="apple"),
+            "https://www.amazon.com.mx/s?k=apple&rh=" "p_6%3AAVDBXBAVVSXLQ%2Cp_123%3A110955",
+        )
+
+    def test_preview_explicit_url_wins_over_structured_fields(self) -> None:
+        self.assertEqual(
+            preview_amazon_url(
+                url="https://example.test/custom",
+                query="ignored",
+                seller=AmazonSeller.amazon_mx,
+                brand=AmazonBrand.apple,
+            ),
+            "https://example.test/custom",
+        )
+        self.assertEqual(
+            preview_amazon_url(seller=AmazonSeller.ugreen_group_limited),
+            "https://www.amazon.com.mx/s?rh=p_6%3AAKXVBT49GGF3B",
+        )
+
+    def test_unknown_builder_options_fail_fast(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unknown Amazon seller"):
+            build_search_url("apple", seller="missing")
+        with self.assertRaisesRegex(ValueError, "Unknown Amazon brand"):
+            build_search_url("apple", brand="missing")
 
 
 class MercadoLibreUrlTests(unittest.TestCase):
@@ -38,14 +116,104 @@ class MercadoLibreUrlTests(unittest.TestCase):
         self.assertEqual(get_identifier("https://example.test/up/MLMU123"), "MLMU123")
         self.assertEqual(get_identifier("https://example.test/p/MLM999"), "MLM999")
 
-    def test_construct_search_url_handles_category_variants(self) -> None:
+    def test_global_search_urls_follow_documented_filter_order(self) -> None:
         self.assertEqual(
-            construct_search_url("Nintendo DS", Category.none),
-            "https://listado.mercadolibre.com.mx/nintendo-ds_NoIndex_True",
+            build_global_search_url("Nintendo 3DS", category=Category.consolas_videojuegos),
+            "https://listado.mercadolibre.com.mx/" "consolas-videojuegos/nintendo-3ds_NoIndex_True",
         )
-        self.assertIn(
-            "_CustId_527927603", construct_search_url("MacBook Pro", Category.apple_official)
+        self.assertEqual(
+            build_global_search_url(
+                "Nintendo 3DS",
+                category=Category.consolas_videojuegos,
+                state=State.nuevo,
+            ),
+            "https://listado.mercadolibre.com.mx/"
+            "consolas-videojuegos/nuevo/nintendo-3ds_NoIndex_True",
         )
+        self.assertEqual(
+            build_global_search_url(
+                "Nintendo 3DS",
+                category=Category.consolas_videojuegos,
+                state=State.usado,
+            ),
+            "https://listado.mercadolibre.com.mx/"
+            "consolas-videojuegos/usado/nintendo-3ds_NoIndex_True",
+        )
+        self.assertEqual(
+            build_global_search_url("Nintendo 3DS", category=Category.consolas, state=State.usado),
+            "https://listado.mercadolibre.com.mx/"
+            "consolas-videojuegos/consolas/usado/nintendo-3ds_NoIndex_True",
+        )
+        self.assertEqual(
+            build_global_search_url(
+                "Nintendo 3DS",
+                category=Category.videojuegos,
+                state=State.nuevo,
+            ),
+            "https://listado.mercadolibre.com.mx/"
+            "consolas-videojuegos/videojuegos/nuevo/nintendo-3ds_NoIndex_True",
+        )
+
+    def test_store_urls_follow_documented_seller_routes(self) -> None:
+        self.assertEqual(
+            build_store_url(MercadoLibreSeller.apple),
+            "https://listado.mercadolibre.com.mx/tienda/apple/",
+        )
+        self.assertEqual(
+            build_store_url(MercadoLibreSeller.apple, category=Category.computacion),
+            "https://listado.mercadolibre.com.mx/tienda/apple/listado/computacion/",
+        )
+        self.assertEqual(
+            build_store_url(MercadoLibreSeller.apple, category=Category.celulares_telefonia),
+            "https://listado.mercadolibre.com.mx/tienda/apple/listado/celulares-telefonia/",
+        )
+        self.assertEqual(
+            build_store_url(MercadoLibreSeller.apple, query="iPad Pro 13"),
+            "https://listado.mercadolibre.com.mx/tienda/apple/ipad-pro-13",
+        )
+        self.assertEqual(
+            build_store_url(MercadoLibreSeller.nintendo, category=Category.videojuegos),
+            "https://listado.mercadolibre.com.mx/"
+            "tienda/nintendo/listado/consolas-videojuegos/videojuegos/",
+        )
+        self.assertEqual(
+            build_store_url(
+                MercadoLibreSeller.nintendo,
+                query="Pokemon",
+                category=Category.videojuegos,
+                state=State.usado,
+            ),
+            "https://listado.mercadolibre.com.mx/"
+            "tienda/nintendo/listado/consolas-videojuegos/videojuegos/usado/pokemon",
+        )
+        self.assertEqual(
+            build_store_url(MercadoLibreSeller.nintendo, query="pokemon"),
+            "https://listado.mercadolibre.com.mx/tienda/nintendo/pokemon",
+        )
+
+    def test_generated_url_uses_explicit_global_query_and_preview_passthrough(self) -> None:
+        self.assertEqual(
+            build_mercado_libre_url(query="Nintendo 3DS"),
+            "https://listado.mercadolibre.com.mx/nintendo-3ds_NoIndex_True",
+        )
+        self.assertEqual(
+            build_mercado_libre_url(
+                query="Nintendo 3DS",
+                category=Category.consolas_videojuegos,
+            ),
+            "https://listado.mercadolibre.com.mx/" "consolas-videojuegos/nintendo-3ds_NoIndex_True",
+        )
+        self.assertEqual(
+            preview_mercado_libre_url(
+                url="https://example.test/custom",
+                seller=MercadoLibreSeller.apple,
+            ),
+            "https://example.test/custom",
+        )
+
+    def test_store_state_without_category_requires_explicit_url(self) -> None:
+        with self.assertRaisesRegex(ValueError, "state filters require a category"):
+            build_store_url(MercadoLibreSeller.apple, state=State.usado)
 
 
 class MercadoLibrePaginationTests(unittest.TestCase):
@@ -177,7 +345,7 @@ class LiverpoolUrlTests(unittest.TestCase):
         encrypted_url = "N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=ventilador"
         with self._mock_seller_url(encrypted_url) as resolver:
             self.assertEqual(
-                build_liverpool_url("Ventilador Liverpool", query="ventilador"),
+                build_liverpool_url(query="ventilador"),
                 "https://www.liverpool.com.mx/tienda/"
                 "N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=ventilador",
             )
@@ -186,18 +354,13 @@ class LiverpoolUrlTests(unittest.TestCase):
         self.assertEqual(params["s"], "ventilador")
         self.assertEqual(params["Fs"], "liverpool")
 
-    def test_search_term_falls_back_to_verified_liverpool_seller_search(self) -> None:
-        encrypted_url = "N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=macbook"
-        with self._mock_seller_url(encrypted_url):
-            self.assertEqual(
-                build_liverpool_url("macbook"),
-                "https://www.liverpool.com.mx/tienda/"
-                "N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=macbook",
-            )
+    def test_search_routes_require_explicit_liverpool_query(self) -> None:
+        with self.assertRaisesRegex(ValueError, "search query cannot be blank"):
+            build_liverpool_url()
 
     def test_generated_brand_filter_requires_explicit_url(self) -> None:
         with self.assertRaisesRegex(ValueError, "brand filters require an explicit url"):
-            build_liverpool_url("Refrigeradores LG", brand="lg")
+            build_liverpool_url(brand="lg")
 
     def test_generated_page_url_uses_resolved_seller_segment(self) -> None:
         with self._mock_seller_url(
@@ -205,10 +368,7 @@ class LiverpoolUrlTests(unittest.TestCase):
             LiverpoolPage.hornos_electricos,
         ) as resolver:
             self.assertEqual(
-                build_liverpool_url(
-                    "Hornos eléctricos",
-                    page=LiverpoolPage.hornos_electricos,
-                ),
+                build_liverpool_url(page=LiverpoolPage.hornos_electricos),
                 self.known_seller_urls[LiverpoolPage.hornos_electricos],
             )
 
@@ -222,9 +382,7 @@ class LiverpoolUrlTests(unittest.TestCase):
             LiverpoolPage.hornos_electricos,
         ):
             self.assertEqual(
-                build_liverpool_url(
-                    "Hornos Black", page=LiverpoolPage.hornos_electricos, query="black"
-                ),
+                build_liverpool_url(page=LiverpoolPage.hornos_electricos, query="black"),
                 "https://www.liverpool.com.mx/tienda/"
                 "N-S1sLjNksKoG%2BC2c1SDPsHDLkL1UcSQDvtOqhAagDbUKyQ4wGi88mGsyxG1aD%2B3uQ?s=black",
             )
@@ -246,7 +404,7 @@ class LiverpoolUrlTests(unittest.TestCase):
             with self.subTest(page=page.name):
                 with self._mock_seller_url(self._segment_for_page(page), page):
                     self.assertEqual(
-                        build_liverpool_url(page.value.display_name, page=page),
+                        build_liverpool_url(page=page),
                         self.known_seller_urls[page],
                     )
 
@@ -325,7 +483,7 @@ class LiverpoolUrlTests(unittest.TestCase):
             )
         with self._mock_seller_url("N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=macbook"):
             self.assertEqual(
-                preview_liverpool_url(search_term="macbook"),
+                preview_liverpool_url(query="macbook"),
                 "https://www.liverpool.com.mx/tienda/"
                 "N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=macbook",
             )
@@ -394,6 +552,75 @@ class LiverpoolUrlTests(unittest.TestCase):
         )
 
 
+class PalacioUrlTests(unittest.TestCase):
+    def test_search_url_hyphenates_global_query(self) -> None:
+        self.assertEqual(
+            build_palacio_search_url("pokemon legends arceus"),
+            "https://www.elpalaciodehierro.com/buscar?q=pokemon-legends-arceus",
+        )
+        self.assertEqual(
+            build_palacio_url(query="magic keyboard"),
+            "https://www.elpalaciodehierro.com/buscar?q=magic-keyboard",
+        )
+
+    def test_global_palacio_search_requires_explicit_query(self) -> None:
+        with self.assertRaisesRegex(ValueError, "search query cannot be blank"):
+            build_palacio_url()
+
+    def test_page_urls_use_documented_palacio_route_segments(self) -> None:
+        self.assertEqual(
+            build_palacio_page_url(PalacioPage.electronica),
+            "https://www.elpalaciodehierro.com/electronica/",
+        )
+        self.assertEqual(
+            build_palacio_page_url(PalacioPage.laptops),
+            "https://www.elpalaciodehierro.com/electronica/computadoras/laptops/",
+        )
+
+    def test_page_brand_filters_are_sorted_encoded_and_deduplicated(self) -> None:
+        self.assertEqual(
+            build_palacio_page_url(
+                PalacioPage.computo,
+                brands=["asus", "Apple", "apple"],
+            ),
+            "https://www.elpalaciodehierro.com/electronica/computadoras/apple%7Casus/",
+        )
+        self.assertEqual(
+            build_palacio_page_url(PalacioPage.computo, brands="dell"),
+            "https://www.elpalaciodehierro.com/electronica/computadoras/dell/",
+        )
+        self.assertEqual(
+            build_palacio_url(
+                page=PalacioPage.computo,
+                brands=(brand for brand in ("razer", "alienware", "dell")),
+            ),
+            "https://www.elpalaciodehierro.com/electronica/computadoras/"
+            "alienware%7Cdell%7Crazer/",
+        )
+
+    def test_page_aliases_resolve_to_palacio_routes(self) -> None:
+        self.assertEqual(resolve_palacio_page("Cómputo"), PalacioPage.computo)
+        self.assertEqual(resolve_palacio_page("hogar/linea-blanca"), PalacioPage.linea_blanca)
+
+    def test_preview_explicit_url_wins_over_structured_fields(self) -> None:
+        self.assertEqual(
+            preview_palacio_url(
+                url="https://example.test/custom",
+                page="Computo",
+                brands=["apple"],
+            ),
+            "https://example.test/custom",
+        )
+
+    def test_unsupported_structured_combinations_fail_fast(self) -> None:
+        with self.assertRaisesRegex(ValueError, "page URLs do not support global query"):
+            build_palacio_url(query="apple", page=PalacioPage.laptops)
+        with self.assertRaisesRegex(ValueError, "brand filters require a page"):
+            build_palacio_url(query="apple", brands=["apple"])
+        with self.assertRaisesRegex(ValueError, "Unknown Palacio page"):
+            build_palacio_page_url("missing")
+
+
 class ProviderParserEdgeTests(unittest.TestCase):
     def test_amazon_parser_skips_results_without_price_or_asin(self) -> None:
         html = """
@@ -406,7 +633,11 @@ class ProviderParserEdgeTests(unittest.TestCase):
         </div>
         """
         with empty_article_storage():
-            motor = Amazon("macbook", Seller.none, storage_path="tests/amazon-edge.json")
+            motor = Amazon(
+                "macbook",
+                build_amazon_url(query="macbook"),
+                storage_path="tests/amazon-edge.json",
+            )
 
         items, next_url = motor.scrape_page({"content": html, "url": motor.url})
 

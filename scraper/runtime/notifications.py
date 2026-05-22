@@ -44,7 +44,7 @@ async def broadcast_new_element(
 
     logger.info(
         "NEW ITEM: %s | %s | $%s | %s",
-        element.get("search_term", "New item"),
+        element.get("job_id", "New item"),
         element.get("title", "Untitled"),
         element.get("price", "unknown"),
         element.get("url", ""),

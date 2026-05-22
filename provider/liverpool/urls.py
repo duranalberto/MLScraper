@@ -213,7 +213,6 @@ def _resolve_seller_filtered_segment(
 
 
 def build_liverpool_url(
-    search_term: str,
     *,
     query: str | None = None,
     page: str | Page | None = None,
@@ -223,9 +222,8 @@ def build_liverpool_url(
     """Build a seller-filtered Liverpool URL from structured job fields.
 
     Args:
-        search_term: Job label and global search fallback when ``query`` is
-            omitted.
-        query: Optional Liverpool search query.
+        query: Optional Liverpool search query. Search routes require a query;
+            page routes may omit it.
         page: Optional known Liverpool page.
         category: Legacy alias for ``page``.
         brand: Unsupported brand/facet selector. Use explicit ``url`` instead.
@@ -247,13 +245,11 @@ def build_liverpool_url(
     if page_value is not None:
         return build_page_url(page_value, query=query)
 
-    query_value = _query_value(query) or search_term
-    return build_search_url(query_value)
+    return build_search_url(_query_value(query))
 
 
 def preview_liverpool_url(
     *,
-    search_term: str = "",
     query: str | None = None,
     page: str | Page | None = None,
     category: str | Category | None = None,
@@ -264,7 +260,6 @@ def preview_liverpool_url(
     """Return the final Liverpool URL for manual testing.
 
     Args:
-        search_term: Optional global search fallback when ``query`` is omitted.
         query: Optional Liverpool search query.
         page: Optional Liverpool page name or enum member.
         category: Legacy alias for ``page``.
@@ -288,11 +283,10 @@ def preview_liverpool_url(
             raise ValueError("Provide a Liverpool page when show_plp=True.")
         return build_page_url(page_value)
 
-    if not (query or search_term or page_value):
-        raise ValueError("Provide query, search_term, page, category, or explicit url.")
+    if not (query or page_value):
+        raise ValueError("Provide query, page, category, or explicit url.")
 
     return build_liverpool_url(
-        search_term,
         query=query,
         page=page_value,
         brand=brand,

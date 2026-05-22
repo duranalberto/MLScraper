@@ -78,7 +78,7 @@ class NewElementBroadcastTests(unittest.IsolatedAsyncioTestCase):
 
         await broadcast_new_element(
             {
-                "search_term": "New job",
+                "job_id": "New job",
                 "title": "Baseline item",
                 "is_initial_scrape": True,
             },
@@ -93,7 +93,7 @@ class NewElementBroadcastTests(unittest.IsolatedAsyncioTestCase):
         send_new = AsyncMock()
         logger = Mock()
         element = {
-            "search_term": "Existing job",
+            "job_id": "Existing job",
             "title": "New arrival",
             "price": 100.0,
             "url": "https://example.test/item",

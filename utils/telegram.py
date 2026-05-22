@@ -136,7 +136,7 @@ def _send_sync(message: str) -> None:
 
 
 def _format_new_item(element: dict) -> str:
-    search_term = element.get("search_term", "New item")
+    job_id = element.get("job_id", "New item")
     title = element.get("title", "Untitled")
     url = element.get("url", "")
     price = element.get("price", 0)
@@ -145,7 +145,7 @@ def _format_new_item(element: dict) -> str:
     return (
         f"🆕 <b>NEW LISTING</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>{search_term}</b>\n\n"
+        f"📦 <b>{job_id}</b>\n\n"
         f'<a href="{url}">{title}</a>\n\n'
         f"💰 <b>${price:,.2f} MXN</b>\n"
         f"🕒 {dt}"
@@ -156,7 +156,7 @@ def _format_price_drop(element: dict) -> Optional[str]:
     if not element.get("percent_change"):
         return None
 
-    search_term = element.get("search_term", "Item")
+    job_id = element.get("job_id", "Item")
     title = element.get("title", "Untitled")
     url = element.get("url", "")
     history = element.get("history", [{}])
@@ -171,7 +171,7 @@ def _format_price_drop(element: dict) -> Optional[str]:
     return (
         f"🔥 <b>PRICE DROP ALERT!</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>{search_term}</b>\n\n"
+        f"📦 <b>{job_id}</b>\n\n"
         f'<a href="{url}">{title}</a>\n\n'
         f"<s>${last_price:,.2f}</s> ➜ <b>${price:,.2f} MXN</b>\n"
         f"💸 Save ${savings:,.2f} ({percent_change:.1f}% OFF)\n\n"

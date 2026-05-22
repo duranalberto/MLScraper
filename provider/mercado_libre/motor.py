@@ -4,8 +4,6 @@ from bs4 import BeautifulSoup
 from shared.scraping.motor import Motor
 
 from . import parser as ml_parser
-from .options import Category
-from .urls import construct_search_url
 
 logger = logging.getLogger(__name__)
 
@@ -15,17 +13,12 @@ class MercadoLibre(Motor):
 
     def __init__(
         self,
-        search_term: str,
-        category: Category = Category.consolas_videojuegos,
+        job_id: str,
+        url: str,
         *,
-        url: str | None = None,
         storage_path: str,
     ):
-        super().__init__(
-            search_term,
-            url or construct_search_url(search_term, category),
-            storage_path=storage_path,
-        )
+        super().__init__(job_id, url, storage_path=storage_path)
 
     def scrape_page(self, body):
         result = ml_parser.parse_search_page(
@@ -39,7 +32,7 @@ class MercadoLibre(Motor):
                 logger.warning(
                     "Mercado Libre returned a blocked/gated page (%s) for '%s' at %s.",
                     result.blocked_reason,
-                    self.search_term,
+                    self.job_id,
                     body.get("url", self.url),
                 )
             return result.items, None
