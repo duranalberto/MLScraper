@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 from aiohttp import ClientError
@@ -136,6 +136,38 @@ class AioHttpFetcherTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("shared.scraping.fetchers.asyncio.sleep", new=AsyncMock()) as sleep:
             html = await AioHttpFetcher().fetch(motor, session, "https://example.test", retries=3)  # type: ignore[arg-type]
+
+        self.assertIsNone(html)
+        self.assertEqual(session.calls, 1)
+        sleep.assert_not_awaited()
+
+    async def test_liverpool_404_retries_and_can_recover(self) -> None:
+        motor = FetcherDummyMotor()
+        session = FakeSession([FakeResponse(404), FakeResponse(200, "<html>ok</html>")])
+
+        with patch("shared.scraping.fetchers.asyncio.sleep", new=AsyncMock()) as sleep:
+            html = await AioHttpFetcher().fetch(
+                motor,
+                cast(Any, session),
+                "https://www.liverpool.com.mx/tienda/zapatos/N-token",
+                retries=2,
+            )
+
+        self.assertEqual(html, "<html>ok</html>")
+        self.assertEqual(session.calls, 2)
+        sleep.assert_awaited_once()
+
+    async def test_non_liverpool_404_still_breaks_without_retrying(self) -> None:
+        motor = FetcherDummyMotor()
+        session = FakeSession([FakeResponse(404), FakeResponse(200, "<html>ok</html>")])
+
+        with patch("shared.scraping.fetchers.asyncio.sleep", new=AsyncMock()) as sleep:
+            html = await AioHttpFetcher().fetch(
+                motor,
+                cast(Any, session),
+                "https://example.test/not-found",
+                retries=2,
+            )
 
         self.assertIsNone(html)
         self.assertEqual(session.calls, 1)

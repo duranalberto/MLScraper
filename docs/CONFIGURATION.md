@@ -42,9 +42,12 @@ Provider-specific fields:
   already form the URL. Explicit `url` is used unchanged for unmodeled
   refinements or copied browser URLs.
 - Liverpool (`lv`): optional `url`, optional `query`, optional Liverpool
-  `page`. Generated URLs resolve Liverpool's seller filter at job creation.
+  `page`, and optional seeded `talla` filters for `zapatos_hombre`. Generated URLs
+  resolve Liverpool's seller filter at job creation.
   Page + query jobs use the root `N-` token route so Liverpool preserves both
   seller and page refinements.
+  `talla` currently supports seeded `zapatos_hombre` combinations only and rejects
+  unsupported values/combinations.
   Legacy `category` is accepted as an alias for `page`. Explicit `url` is the
   only bypass and is used unchanged, including custom sellers or unmodeled
   filter combinations.
@@ -60,6 +63,15 @@ and URL rules.
 See [Liverpool](LIVERPOOL.md) for the page catalogue and URL validation notes.
 See [Palacio de Hierro](PALACIO_DE_HIERRO.md) for generated page and search URL
 rules.
+
+On-demand URL preview:
+
+```bash
+python app.py preview-url --provider lv --job-id "PlayStation"
+```
+
+This resolves and prints exactly one final job URL from `config/jobs.yaml`
+without starting the FastAPI service or scraper loops.
 
 ## `config/motors.yaml`
 

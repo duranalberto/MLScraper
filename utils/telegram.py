@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
+from html import escape
 from pathlib import Path
 from typing import Optional
 
@@ -34,10 +36,12 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _CONFIG_PATH = _REPO_ROOT / "config" / "telegram.yaml"
-
-# ---------------------------------------------------------------------------
-# Credential loading
-# ---------------------------------------------------------------------------
+_PROVIDER_NAMES = {
+    "az": "Amazon",
+    "lv": "Liverpool",
+    "ml": "Mercado Libre",
+    "ph": "Palacio de Hierro",
+}
 
 
 def _load_config() -> tuple[str, str]:
@@ -81,11 +85,6 @@ _ENABLED = bool(_API_TOKEN and _CHAT_ID)
 _API_URL = f"https://api.telegram.org/bot{_API_TOKEN}/sendMessage" if _ENABLED else ""
 
 
-# ---------------------------------------------------------------------------
-# Public async API
-# ---------------------------------------------------------------------------
-
-
 async def send_new_to_telegram(element: dict) -> None:
     """Send a new-listing notification.  No-op when credentials are missing."""
     if not _ENABLED:
@@ -101,11 +100,6 @@ async def send_price_drop_to_telegram(element: dict) -> None:
     message = _format_price_drop(element)
     if message:
         await _send_async(message)
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 async def _send_async(message: str) -> None:
@@ -136,19 +130,23 @@ def _send_sync(message: str) -> None:
 
 
 def _format_new_item(element: dict) -> str:
-    job_id = element.get("job_id", "New item")
-    title = element.get("title", "Untitled")
-    url = element.get("url", "")
-    price = element.get("price", 0)
-    dt = element.get("datetime", "Unknown")
+    job_id = escape(str(element.get("job_id", "New item")))
+    title = escape(str(element.get("title", "Untitled")))
+    price = _coerce_number(element.get("price", 0))
+    provider = _format_provider(element.get("provider"))
+    first_seen = _format_timestamp(element.get("datetime"))
+    link = _format_product_link(element.get("url"))
 
     return (
-        f"🆕 <b>NEW LISTING</b>\n"
-        f"━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>{job_id}</b>\n\n"
-        f'<a href="{url}">{title}</a>\n\n'
-        f"💰 <b>${price:,.2f} MXN</b>\n"
-        f"🕒 {dt}"
+        f"🆕 <b>${price:,.2f} MXN</b>  {title}\n\n"
+        f"<i>Product</i>\n"
+        f"<b>{title}</b>\n\n"
+        f"<i>Listing details</i>\n"
+        f"💰 Price: <b>${price:,.2f} MXN</b>\n"
+        f"🏪 Provider: <b>{provider}</b>\n"
+        f"🔎 Monitor: {job_id}\n\n"
+        f"🕒 Found: {first_seen}\n\n"
+        f"{link}"
     )
 
 
@@ -156,27 +154,62 @@ def _format_price_drop(element: dict) -> Optional[str]:
     if not element.get("percent_change"):
         return None
 
-    job_id = element.get("job_id", "Item")
-    title = element.get("title", "Untitled")
-    url = element.get("url", "")
+    job_id = escape(str(element.get("job_id", "Item")))
+    title = escape(str(element.get("title", "Untitled")))
     history = element.get("history", [{}])
     last_price = _coerce_number(
         element.get("previous_price", history[0].get("price", 0) if history else 0)
     )
     price = _coerce_number(element.get("new_price", element.get("price", 0)))
     percent_change = abs(_coerce_number(element.get("percent_change", 0)))
-    dt = history[0].get("datetime", "Unknown") if history else "Unknown"
+    provider = _format_provider(element.get("provider"))
+    first_seen = _format_timestamp(element.get("datetime"))
+    updated = element.get("last_updated")
     savings = last_price - price
+    link = _format_product_link(element.get("url"))
+    time_lines = f"🕒 Found: {first_seen}"
+    if updated:
+        time_lines += f"\n🕒 Updated: {_format_timestamp(updated)}"
 
     return (
-        f"🔥 <b>PRICE DROP ALERT!</b>\n"
-        f"━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>{job_id}</b>\n\n"
-        f'<a href="{url}">{title}</a>\n\n'
-        f"<s>${last_price:,.2f}</s> ➜ <b>${price:,.2f} MXN</b>\n"
-        f"💸 Save ${savings:,.2f} ({percent_change:.1f}% OFF)\n\n"
-        f"🕒 Updated: {dt}"
+        f"🔥 <b>{percent_change:.1f}% OFF</b>  <s>${last_price:,.2f}</s> -> "
+        f"<b>${price:,.2f} MXN</b>  {title}\n\n"
+        f"<i>Product</i>\n"
+        f"<b>{title}</b>\n\n"
+        f"<i>Price details</i>\n"
+        f"Previous price: <s>${last_price:,.2f} MXN</s>\n"
+        f"Current price: <b>${price:,.2f} MXN</b>\n"
+        f"Savings: <b>${savings:,.2f} MXN</b>\n"
+        f"Reduction from previous: <b>{percent_change:.1f}%</b>\n\n"
+        f"<i>Source</i>\n"
+        f"🏪 Provider: <b>{provider}</b>\n"
+        f"🔎 Monitor: {job_id}\n\n"
+        f"{time_lines}\n\n"
+        f"{link}"
     )
+
+
+def _format_provider(provider: object) -> str:
+    value = str(provider or "Unknown")
+    return escape(_PROVIDER_NAMES.get(value, value))
+
+
+def _format_timestamp(value: object) -> str:
+    text = str(value or "Unknown")
+    if len(text) <= 10:
+        return escape(text)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return escape(text)
+    return escape(parsed.strftime("%Y-%m-%d %H:%M"))
+
+
+def _format_product_link(url: object) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return "🔗 Product link unavailable"
+    return f'🔗 <a href="{escape(value, quote=True)}">Open product</a>'
 
 
 def _coerce_number(value: object) -> float:

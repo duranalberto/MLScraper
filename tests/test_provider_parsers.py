@@ -24,6 +24,7 @@ from provider.liverpool.urls import (
     build_canonical_page_url,
     build_liverpool_url,
     build_page_url,
+    build_zapatos_talla_url,
     current_page_number,
     preview_liverpool_url,
 )
@@ -408,6 +409,70 @@ class LiverpoolUrlTests(unittest.TestCase):
                         self.known_seller_urls[page],
                     )
 
+    def test_playstation_landing_page_builds_seller_filtered_url(self) -> None:
+        encrypted_url = "N-playstationToken%3D"
+        with self._mock_seller_url(encrypted_url, LiverpoolPage.playstation) as resolver:
+            self.assertEqual(
+                build_liverpool_url(page=LiverpoolPage.playstation),
+                "https://www.liverpool.com.mx/tienda/playstation/N-playstationToken%3D",
+            )
+            self.assertEqual(
+                build_liverpool_url(page=LiverpoolPage.playstation, query="dualsense"),
+                "https://www.liverpool.com.mx/tienda/N-playstationToken%3D?s=dualsense",
+            )
+
+        params = resolver.call_args.kwargs["params"]
+        self.assertEqual(params["categoryId"], "CAT1161024")
+        self.assertEqual(params["Fs"], "liverpool")
+
+    def test_zapatos_talla_seeded_urls_match_documented_fixtures(self) -> None:
+        self.assertEqual(
+            build_zapatos_talla_url("26.5 cm"),
+            "https://www.liverpool.com.mx/tienda/zapatos/"
+            "N-DSNCDwNe0TQmqDl9oaVW3NMMVWOMWKnBTxTMkuCm8FJSYNNgpfpKZJhbO%2FeHb1VtGHTmN%2F9HShTHsphfUIoyiA%3D%3D",
+        )
+        self.assertEqual(
+            build_zapatos_talla_url("27 cm"),
+            "https://www.liverpool.com.mx/tienda/zapatos/"
+            "N-DSNCDwNe0TQmqDl9oaVW3P49z6zKiRdLU4IIpgT97FoXJTIUSUZJlJZf8BVMSBuD0Bn3ELEZFYONaFEjhb%2FKag%3D%3D",
+        )
+        self.assertEqual(
+            build_zapatos_talla_url(["26.5", "27 cm"]),
+            "https://www.liverpool.com.mx/tienda/zapatos/"
+            "N-DSNCDwNe0TQmqDl9oaVW3NMMVWOMWKnBTxTMkuCm8FK8nbspJJHyymB2JB2cQAhiuNp2DrMWVxMOlgTqk%2BZcRA%3D%3D",
+        )
+
+    def test_zapatos_talla_seller_fixtures_are_generated(self) -> None:
+        self.assertEqual(
+            build_liverpool_url(page=LiverpoolPage.zapatos_hombre, talla="26.5 cm"),
+            "https://www.liverpool.com.mx/tienda/zapatos/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOqRWmHi9IHo7DohJbsKzc6imfhD61Tn4E65LWhl6f0t7AaY0oFPrT%2BCxbnEWoFgLLk%3D",
+        )
+        self.assertEqual(
+            build_liverpool_url(page=LiverpoolPage.zapatos_hombre, talla=["27"]),
+            "https://www.liverpool.com.mx/tienda/zapatos/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOozVqOODGOtunTN8e%2BvWv35ro9Gu4Wj4ohV%2F0lAwq%2BnstUtcATsuqxRHlNDb77mhq0%3D",
+        )
+        self.assertEqual(
+            build_liverpool_url(page=LiverpoolPage.zapatos_hombre, talla=["27 cm", "26.5 cm"]),
+            "https://www.liverpool.com.mx/tienda/zapatos/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOqRWmHi9IHo7DohJbsKzc6ie3dJdH0yzQY5Wf7pWwAqdcmJw7uqeFRVZhuwaUGwFJM%3D",
+        )
+        self.assertNotEqual(
+            build_liverpool_url(page=LiverpoolPage.zapatos_hombre, talla="26.5 cm"),
+            build_zapatos_talla_url("26.5 cm"),
+        )
+
+    def test_zapatos_talla_routes_fail_fast_for_unsupported_combinations(self) -> None:
+        with self.assertRaisesRegex(ValueError, "talla filters require a page"):
+            build_liverpool_url(talla="26.5 cm")
+        with self.assertRaisesRegex(ValueError, "only for 'zapatos_hombre'"):
+            build_liverpool_url(page=LiverpoolPage.playstation, talla="26.5 cm")
+        with self.assertRaisesRegex(ValueError, "do not support query combinations"):
+            build_liverpool_url(page=LiverpoolPage.zapatos_hombre, talla="26.5 cm", query="nike")
+        with self.assertRaisesRegex(ValueError, "Unsupported Liverpool talla"):
+            build_liverpool_url(page=LiverpoolPage.zapatos_hombre, talla="30 cm")
+
     def test_resolver_rejects_missing_token(self) -> None:
         payload = self._seller_payload("", LiverpoolPage.nintendo)
         with patch(
@@ -459,6 +524,14 @@ class LiverpoolUrlTests(unittest.TestCase):
             LiverpoolPage.juegos_nintendo,
         )
         self.assertEqual(
+            resolve_page_path("Home", "Videojuegos", "PlayStation"),
+            LiverpoolPage.playstation,
+        )
+        self.assertEqual(
+            resolve_page_path("Home", "Hombre", "Zapatos"),
+            LiverpoolPage.zapatos_hombre,
+        )
+        self.assertEqual(
             resolve_page_path("Línea Blanca y Electrodomésticos", "Electrodomésticos de Cocina"),
             LiverpoolPage.electrodomesticos_de_cocina,
         )
@@ -473,6 +546,8 @@ class LiverpoolUrlTests(unittest.TestCase):
     def test_prompt_aliases_resolve_to_canonical_pages(self) -> None:
         self.assertEqual(resolve_page("Hornos eléctricos"), LiverpoolPage.hornos_electricos)
         self.assertEqual(resolve_page("Consolas y videojuegos Nintendo"), LiverpoolPage.nintendo)
+        self.assertEqual(resolve_page("PlayStation"), LiverpoolPage.playstation)
+        self.assertEqual(resolve_page("Zapatos"), LiverpoolPage.zapatos_hombre)
 
     def test_preview_liverpool_url_accepts_plain_strings(self) -> None:
         with self._mock_seller_url("N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=ventilador"):

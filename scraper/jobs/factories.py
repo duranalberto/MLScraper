@@ -162,6 +162,7 @@ def _lv_factory(
     page: LiverpoolPage | None = None,
     category: LiverpoolPage | None = None,
     brand: LiverpoolBrand | str | None = None,
+    talla: str | list[str] | tuple[str, ...] | None = None,
     **_,
 ) -> Liverpool:
     """
@@ -173,9 +174,10 @@ def _lv_factory(
         job_id="LV Laptops"  →  liverpool/lv-laptops.json
     """
     explicit_url = _explicit_url(url)
-    if explicit_url and (query or page or category or brand):
+    if explicit_url and (query or page or category or brand or talla):
         logger.warning(
-            "Liverpool job %r uses explicit url; ignoring page/category/query/brand filters. "
+            "Liverpool job %r uses explicit url; ignoring page/category/query/brand/talla "
+            "filters. "
             "Remove 'url' to use structured Liverpool search fields.",
             job_id,
         )
@@ -188,6 +190,7 @@ def _lv_factory(
         page=page,
         category=category,
         brand=brand,
+        talla=talla,
     )
 
     path = _storage_path("liverpool", job_id)

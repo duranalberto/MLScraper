@@ -80,6 +80,14 @@ jobs:
     job_id: Juegos Nintendo
     category: juegos_nintendo
 
+  # Seeded Zapatos talla combinations are generated from documented fixtures.
+  - provider: lv
+    job_id: Zapatos talla 26.5 y 27
+    category: zapatos_hombre
+    talla:
+      - "26.5"
+      - "27 cm"
+
   # Explicit Liverpool URLs are the only bypass. They are used unchanged.
   - provider: lv
     job_id: Laptops custom filters

@@ -131,6 +131,7 @@ class MotorScrapePageTests(unittest.IsolatedAsyncioTestCase):
         kwargs = call.kwargs
         self.assertEqual(kwargs["broadcast_type"], "new_element")
         self.assertEqual(kwargs["element"]["job_id"], "Scripted Search")
+        self.assertEqual(kwargs["element"]["provider"], "scripted")
         self.assertTrue(kwargs["element"]["is_initial_scrape"])
 
     async def test_updated_item_callback_uses_is_updated_payload_without_initial_flag(self) -> None:
@@ -174,6 +175,7 @@ class MotorScrapePageTests(unittest.IsolatedAsyncioTestCase):
         assert call is not None
         kwargs = call.kwargs
         self.assertEqual(kwargs["broadcast_type"], "is_updated")
+        self.assertEqual(kwargs["element"]["provider"], "scripted")
         self.assertEqual(kwargs["element"]["history"][0]["price"], 100.0)
         self.assertNotIn("is_initial_scrape", kwargs["element"])
 

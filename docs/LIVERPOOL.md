@@ -9,8 +9,20 @@ explicit `url`, because explicit URLs are used unchanged.
 - `query` only: resolves and builds a global seller-filtered search URL.
 - `page` only: resolves and builds the seller-filtered URL for that page.
 - `page` plus `query`: builds `https://www.liverpool.com.mx/tienda/N-{page_token}?s={query}`.
+- `page=zapatos` plus `talla`: builds a seeded seller+talla fixture URL for
+  supported combinations only.
 - `url`: bypasses all generated URL rules and is used exactly as configured.
 - `category`: legacy alias for `page`; conflicting `page` and `category` values are rejected.
+
+`talla` accepts one string or multiple strings, normalizes aliases (`26.5` →
+`26.5 cm`, `27` → `27 cm`), deduplicates values, and currently supports only:
+
+- `26.5 cm`
+- `27 cm`
+- `26.5 cm + 27 cm`
+
+`talla` requires `page`/`category` and is currently supported only for
+`zapatos_hombre`. `query + talla` is intentionally unsupported in this seeded v1.
 
 The root-token page + query shape is intentional. Validation showed that
 appending `?s=` to the slugged seller URL can drop the selected page and seller
@@ -57,10 +69,49 @@ tokens.
 | `accesorios_computacion` | Products | Home > Electrónica > Computación > Accesorios Computación | `https://www.liverpool.com.mx/tienda/accesorios-computaci%C3%B3n/cat670053` | `https://www.liverpool.com.mx/tienda/accesorios-computaci%C3%B3n/N-S1sLjNksKoG%2BC2c1SDPsHPyN7Zg7IIn7KTQOnaUXA84%3D` |
 | `videojuegos` | Landing | Home > Videojuegos | `https://www.liverpool.com.mx/tienda/videojuegos/cat670055` | `https://www.liverpool.com.mx/tienda/videojuegos/N-S1sLjNksKoG%2BC2c1SDPsHHgKKoxCWs4ssLitZ2y5bdQ%3D` |
 | `nintendo` | Landing | Home > Videojuegos > Nintendo | `https://www.liverpool.com.mx/tienda/nintendo/cat5030010` | `https://www.liverpool.com.mx/tienda/nintendo/N-S1sLjNksKoG%2BC2c1SDPsHKoOUK876ftr4S1vpt6rlqU%3D` |
+| `playstation` | Landing | Home > Videojuegos > PlayStation | `https://www.liverpool.com.mx/tienda/playstation/cat1161024` | resolved at runtime via `/getPlpFilter` with `categoryId=CAT1161024` and `Fs=liverpool` |
+| `zapatos_hombre` | Landing | Home > Hombre > Zapatos | `https://www.liverpool.com.mx/tienda/zapatos/cat5040004` | resolved at runtime via `/getPlpFilter` with `categoryId=CAT5040004` and `Fs=liverpool` |
 | `consolas_nintendo` | Products | Home > Videojuegos > Nintendo > Consolas Nintendo | `https://www.liverpool.com.mx/tienda/consolas-nintendo/catst16854843` | `https://www.liverpool.com.mx/tienda/consolas-nintendo/N-S1sLjNksKoG%2BC2c1SDPsHMZu13evjQvlZwcij64vMMV4Z%2ByNx1qLg8geatR3xCA5` |
 | `juegos_nintendo` | Products | Home > Videojuegos > Nintendo > Juegos Nintendo | `https://www.liverpool.com.mx/tienda/juegos-nintendo/catst14539980` | `https://www.liverpool.com.mx/tienda/juegos-nintendo/N-S1sLjNksKoG%2BC2c1SDPsHEMtiDHLusAuxLK0y30fWRU5PhnhiYjJElHuz9EseRgf` |
 | `controles_nintendo` | Products | Home > Videojuegos > Nintendo > Controles Nintendo | `https://www.liverpool.com.mx/tienda/controles-nintendo/catst20605695` | `https://www.liverpool.com.mx/tienda/controles-nintendo/N-S1sLjNksKoG%2BC2c1SDPsHCsVwygWvVuPuIw9xarBO8VTKv41DLyvSQbEdA8sg1qy` |
 | `apple` | Landing | Home > Apple | `https://www.liverpool.com.mx/tienda/apple/catst2145072` | `https://www.liverpool.com.mx/tienda/apple/N-S1sLjNksKoG%2BC2c1SDPsHNm0puD%2BxMdUs8fFWfZr2VPe%2F6v1sCWzDBDSulA990d4` |
+
+## Seeded Zapatos Talla Fixtures
+
+Reverse-engineered refinement metadata from production Zapatos URLs:
+
+```text
+label: attributes.rzlv_tallaRopa
+displayName: Talla
+or: true (multi-select OR semantics)
+```
+
+Non-seller seeded combinations:
+
+- `26.5 cm`:
+  `https://www.liverpool.com.mx/tienda/zapatos/N-DSNCDwNe0TQmqDl9oaVW3NMMVWOMWKnBTxTMkuCm8FJSYNNgpfpKZJhbO%2FeHb1VtGHTmN%2F9HShTHsphfUIoyiA%3D%3D`
+- `27 cm`:
+  `https://www.liverpool.com.mx/tienda/zapatos/N-DSNCDwNe0TQmqDl9oaVW3P49z6zKiRdLU4IIpgT97FoXJTIUSUZJlJZf8BVMSBuD0Bn3ELEZFYONaFEjhb%2FKag%3D%3D`
+- `26.5 cm + 27 cm`:
+  `https://www.liverpool.com.mx/tienda/zapatos/N-DSNCDwNe0TQmqDl9oaVW3NMMVWOMWKnBTxTMkuCm8FK8nbspJJHyymB2JB2cQAhiuNp2DrMWVxMOlgTqk%2BZcRA%3D%3D`
+
+Seller + talla seeded combinations used by generated Liverpool jobs:
+
+- `liverpool + 26.5 cm`:
+  `https://www.liverpool.com.mx/tienda/zapatos/N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOqRWmHi9IHo7DohJbsKzc6imfhD61Tn4E65LWhl6f0t7AaY0oFPrT%2BCxbnEWoFgLLk%3D`
+- `liverpool + 27 cm`:
+  `https://www.liverpool.com.mx/tienda/zapatos/N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOozVqOODGOtunTN8e%2BvWv35ro9Gu4Wj4ohV%2F0lAwq%2BnstUtcATsuqxRHlNDb77mhq0%3D`
+- `liverpool + 26.5 cm + 27 cm`:
+  `https://www.liverpool.com.mx/tienda/zapatos/N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOqRWmHi9IHo7DohJbsKzc6ie3dJdH0yzQY5Wf7pWwAqdcmJw7uqeFRVZhuwaUGwFJM%3D`
+
+Complex filter token notes:
+
+- The encrypted `N-...` token is opaque and produced by Liverpool.
+- Production payloads show these refinements for seller+talla routes:
+  - `variants.sellernames = liverpool` (`or=true`)
+  - one or more repeated `attributes.rzlv_tallaRopa = <size>` (`or=true`)
+  - `attributes.ancestors = CAT5040004` (`or=false`)
+- Generated v1 routes are fixture-backed for these combinations so URL output is deterministic.
 
 ## `?showPLP`
 

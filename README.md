@@ -32,6 +32,12 @@ The service listens on port `80` and exposes:
 GET /health
 ```
 
+Generate one configured job URL on demand (without running scraper loops):
+
+```bash
+python app.py preview-url --provider lv --job-id "PlayStation"
+```
+
 Run tests:
 
 ```bash

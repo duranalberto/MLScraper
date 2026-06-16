@@ -336,11 +336,14 @@ class Motor(ABC):
 
     def _article_payload(self, article: Article) -> dict:
         """
-        Enrich the article dump with motor-level context (job_id)
-        for outbound notifications. job_id lives here, not in stored JSON.
+        Enrich the article dump with motor-level context for notifications.
+
+        ``job_id`` and ``provider`` identify the configured monitor that found
+        the article; neither value belongs in stored product JSON.
         """
         payload = article.dump()
         payload["job_id"] = self.job_id
+        payload["provider"] = self.provider_key
         return payload
 
     def print_compare(self) -> None:

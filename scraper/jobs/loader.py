@@ -126,6 +126,25 @@ def _coerce_palacio_brands(raw: Any, entry: dict) -> str | list[str] | None:
     return None
 
 
+def _coerce_liverpool_talla(raw: Any, entry: dict) -> str | list[str] | None:
+    """Validate Liverpool talla filters as one string or a non-empty list."""
+    if isinstance(raw, str):
+        value = raw.strip()
+        if value:
+            return value
+    elif isinstance(raw, list):
+        values = [value.strip() for value in raw if isinstance(value, str)]
+        if len(values) == len(raw) and values and all(values):
+            return values
+
+    logger.warning(
+        "Liverpool entry %r has invalid 'talla'; use one talla string or a non-empty list "
+        "of talla strings.",
+        entry,
+    )
+    return None
+
+
 def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
     """Coerce provider-owned YAML fields without creating shared filter inputs."""
     provider = clean["provider"]
@@ -163,6 +182,12 @@ def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
                 return None
             clean["page"] = category_value
             clean.pop("category", None)
+
+        if "talla" in clean:
+            talla = _coerce_liverpool_talla(clean["talla"], entry)
+            if talla is None:
+                return None
+            clean["talla"] = talla
 
     if provider == "ph":
         if "page" in clean:

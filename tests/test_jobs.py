@@ -91,6 +91,40 @@ jobs:
         self.assertEqual(jobs[0]["page"], LiverpoolPage.juegos_nintendo)
         self.assertNotIn("category", jobs[0])
 
+    def test_load_jobs_accepts_liverpool_talla_string_or_list(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: lv
+    job_id: Zapatos 26.5
+    category: zapatos_hombre
+    talla: "26.5 cm"
+  - provider: lv
+    job_id: Zapatos 26.5 y 27
+    page: zapatos_hombre
+    talla:
+      - "26.5"
+      - "27 cm"
+""")
+
+        jobs = load_jobs(path)
+
+        self.assertEqual(jobs[0]["page"], LiverpoolPage.zapatos_hombre)
+        self.assertEqual(jobs[0]["talla"], "26.5 cm")
+        self.assertEqual(jobs[1]["page"], LiverpoolPage.zapatos_hombre)
+        self.assertEqual(jobs[1]["talla"], ["26.5", "27 cm"])
+
+    def test_load_jobs_skips_invalid_liverpool_talla_shape(self) -> None:
+        path = self._write_jobs("""
+jobs:
+  - provider: lv
+    job_id: bad talla
+    page: zapatos_hombre
+    talla:
+      - "26.5 cm"
+      - 27
+""")
+        self.assertEqual(load_jobs(path), [])
+
     def test_load_jobs_skips_invalid_entries_without_short_circuiting(self) -> None:
         path = self._write_jobs("""
 jobs:
@@ -565,11 +599,12 @@ class FactoryTests(unittest.TestCase):
                     query="ignored",
                     page=LiverpoolPage.hornos_electricos,
                     brand="lg",
+                    talla="26.5 cm",
                 )
 
         self.assertEqual(motor.url, "https://example.test/custom")
         self.assertEqual(motor.storage_path, "liverpool/custom.json")
-        self.assertIn("ignoring page/category/query/brand", "\n".join(logs.output))
+        self.assertIn("ignoring page/category/query/brand/talla", "\n".join(logs.output))
 
     def test_liverpool_factory_rejects_generated_brand_filter(self) -> None:
         with empty_article_storage():
@@ -612,6 +647,20 @@ class FactoryTests(unittest.TestCase):
             motor.url,
             "https://www.liverpool.com.mx/tienda/computaci%C3%B3n/"
             "N-S1sLjNksKoG%2BC2c1SDPsHN%2BJ%2BVnTTvZIur1XfBh58ds%3D",
+        )
+
+    def test_liverpool_factory_generates_seeded_zapatos_talla_url(self) -> None:
+        with empty_article_storage():
+            motor = factories._lv_factory(
+                "Zapatos 26.5 y 27",
+                page=LiverpoolPage.zapatos_hombre,
+                talla=["27 cm", "26.5 cm"],
+            )
+
+        self.assertEqual(
+            motor.url,
+            "https://www.liverpool.com.mx/tienda/zapatos/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOqRWmHi9IHo7DohJbsKzc6ie3dJdH0yzQY5Wf7pWwAqdcmJw7uqeFRVZhuwaUGwFJM%3D",
         )
 
     def test_palacio_factory_generates_search_url_without_explicit_url(self) -> None:
@@ -694,6 +743,7 @@ class FactoryTests(unittest.TestCase):
                     page=cast(Any, {"bad": "type"}),
                     category=cast(Any, ["bad"]),
                     brand=cast(Any, object()),
+                    talla=cast(Any, {"bad": "type"}),
                 )
                 ph_motor = factories._ph_factory(
                     "PH bypass malformed",

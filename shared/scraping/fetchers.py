@@ -11,6 +11,10 @@ from utils.headers import get_random_header
 logger = logging.getLogger(__name__)
 
 
+def _is_liverpool_url(url: str) -> bool:
+    return "liverpool.com.mx" in str(url).lower()
+
+
 class AioHttpFetcher:
     async def fetch(
         self,
@@ -61,7 +65,11 @@ class AioHttpFetcher:
                         continue
                     if motor.debug:
                         logger.warning("HTTP %s for %s", resp.status, url)
-                    if resp.status in {403, 404}:
+                    if resp.status == 404 and _is_liverpool_url(url):
+                        # Liverpool occasionally serves transient 404s for valid tokens.
+                        # Retry with a fresh browser-like header profile before failing.
+                        pass
+                    elif resp.status in {403, 404}:
                         break
             except ClientError, asyncio.TimeoutError:
                 if motor.debug:

@@ -53,11 +53,11 @@ jobs:
   #   job_id: zelda wii
   #   query: zelda wii
 
-  # - provider: ml
-  #  job_id: nintendo ds
-  #  query: nintendo 3ds
-  #  category: consolas
-  #  state: usado
+  - provider: ml
+    job_id: nintendo ds
+    query: nintendo 3ds
+    category: consolas
+    state: usado
 
   # - provider: ml
   #   job_id: nintendo switch
@@ -78,26 +78,37 @@ jobs:
   #   query: game cube juegos
 
   # ── Liverpool ─────────────────────────────────────────────────────────────
-  - provider: lv
-    job_id: Ventilador Liverpool
-    query: ventilador
+  #- provider: lv
+  #  job_id: Ventilador Liverpool
+  #  query: ventilador
 
-  - provider: lv
-    job_id: Hornos eléctricos
-    page: hornos_electricos
+  #- provider: lv
+  #  job_id: Hornos eléctricos
+  #  page: hornos_electricos
 
-  - provider: lv
-    job_id: Hornos eléctricos Breville
-    page: Hornos eléctricos
-    query: breville
+  #- provider: lv
+  #  job_id: Hornos eléctricos Breville
+  #  page: Hornos eléctricos
+  #  query: breville
 
   - provider: lv
     job_id: Apple
     page: Apple
 
   - provider: lv
+    job_id: PlayStation
+    category: playstation
+
+  - provider: lv
     job_id: Juegos Nintendo catálogo
     category: juegos_nintendo
+
+  #- provider: lv
+  #  job_id: Zapatos Hombre talla 26.5 y 27
+  #  category: zapatos_hombre
+  #  talla:
+  #    - "26.5 cm"
+  #    - "27 cm"
 
   # ── Palacio de Hierro ──────────────────────────────────────────────────────
   - provider: ph
@@ -132,6 +143,36 @@ jobs:
     query: macbook
     seller: amazon_mx
     brand: apple
+
+  - provider: az
+    job_id: urevo
+    query: urevo
+    seller: amazon_mx
+
+  - provider: az
+    job_id: walking pad
+    query: walking pad
+    seller: amazon_mx
+
+  - provider: az
+    job_id: amiibo
+    query: amiibo
+    seller: amazon_mx
+
+  - provider: az
+    job_id: dk books
+    query: dk books
+    seller: amazon_mx
+
+  - provider: az
+    job_id: oreilly
+    query: oreilly
+    seller: amazon_mx
+
+  - provider: az
+    job_id: funko game of thrones
+    query: funko game of thrones
+    seller: amazon_mx
 
   - provider: az
     job_id: mac studio

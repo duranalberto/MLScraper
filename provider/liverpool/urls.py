@@ -18,6 +18,45 @@ from .options import (
 BASE_URL = "https://www.liverpool.com.mx/tienda"
 FILTER_URL = "https://www.liverpool.com.mx/getPlpFilter"
 REQUEST_TIMEOUT_SECONDS = 15
+TALLA_REFINEMENT_NAME = "attributes.rzlv_tallaRopa"
+
+_SUPPORTED_ZAPATOS_TALLAS = {
+    "26.5 cm": "26.5 cm",
+    "26.5": "26.5 cm",
+    "27 cm": "27 cm",
+    "27": "27 cm",
+}
+
+# Liverpool-generated fixtures captured from production routes for Zapatos.
+_ZAPATOS_TALLA_URLS = {
+    ("26.5 cm",): (
+        "https://www.liverpool.com.mx/tienda/zapatos/"
+        "N-DSNCDwNe0TQmqDl9oaVW3NMMVWOMWKnBTxTMkuCm8FJSYNNgpfpKZJhbO%2FeHb1VtGHTmN%2F9HShTHsphfUIoyiA%3D%3D"
+    ),
+    ("27 cm",): (
+        "https://www.liverpool.com.mx/tienda/zapatos/"
+        "N-DSNCDwNe0TQmqDl9oaVW3P49z6zKiRdLU4IIpgT97FoXJTIUSUZJlJZf8BVMSBuD0Bn3ELEZFYONaFEjhb%2FKag%3D%3D"
+    ),
+    ("26.5 cm", "27 cm"): (
+        "https://www.liverpool.com.mx/tienda/zapatos/"
+        "N-DSNCDwNe0TQmqDl9oaVW3NMMVWOMWKnBTxTMkuCm8FK8nbspJJHyymB2JB2cQAhiuNp2DrMWVxMOlgTqk%2BZcRA%3D%3D"
+    ),
+}
+
+_ZAPATOS_SELLER_TALLA_URLS = {
+    ("26.5 cm",): (
+        "https://www.liverpool.com.mx/tienda/zapatos/"
+        "N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOqRWmHi9IHo7DohJbsKzc6imfhD61Tn4E65LWhl6f0t7AaY0oFPrT%2BCxbnEWoFgLLk%3D"
+    ),
+    ("27 cm",): (
+        "https://www.liverpool.com.mx/tienda/zapatos/"
+        "N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOozVqOODGOtunTN8e%2BvWv35ro9Gu4Wj4ohV%2F0lAwq%2BnstUtcATsuqxRHlNDb77mhq0%3D"
+    ),
+    ("26.5 cm", "27 cm"): (
+        "https://www.liverpool.com.mx/tienda/zapatos/"
+        "N-S1sLjNksKoG%2BC2c1SDPsHO5452djswD00Q%2BK5TJ2fOqRWmHi9IHo7DohJbsKzc6ie3dJdH0yzQY5Wf7pWwAqdcmJw7uqeFRVZhuwaUGwFJM%3D"
+    ),
+}
 
 
 class LiverpoolResolverError(ValueError):
@@ -26,6 +65,44 @@ class LiverpoolResolverError(ValueError):
 
 def _query_value(query: str | None) -> str:
     return str(query or "").strip()
+
+
+def _normalize_talla_values(
+    talla: str | list[str] | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    """Normalize, validate, and canonicalize Liverpool Zapatos talla values."""
+    if talla in (None, ""):
+        return ()
+
+    raw_values: list[str]
+    if isinstance(talla, str):
+        raw_values = [talla]
+    elif isinstance(talla, (list, tuple)):
+        raw_values = [str(value) for value in talla]
+    else:
+        raise ValueError("Liverpool talla must be a string or a list/tuple of strings.")
+
+    values: list[str] = []
+    for raw in raw_values:
+        cleaned = str(raw or "").strip()
+        if not cleaned:
+            continue
+        canonical = _SUPPORTED_ZAPATOS_TALLAS.get(cleaned.casefold())
+        if canonical is None:
+            supported = ", ".join(sorted(set(_SUPPORTED_ZAPATOS_TALLAS.values())))
+            raise ValueError(
+                f"Unsupported Liverpool talla {cleaned!r}. Supported values: {supported}."
+            )
+        values.append(canonical)
+
+    if not values:
+        raise ValueError("Liverpool talla cannot be blank.")
+
+    ordered: list[str] = []
+    for value in values:
+        if value not in ordered:
+            ordered.append(value)
+    return tuple(sorted(ordered))
 
 
 def _resolve_page_aliases(
@@ -218,6 +295,7 @@ def build_liverpool_url(
     page: str | Page | None = None,
     category: str | Category | None = None,
     brand: Brand | str | None = None,
+    talla: str | list[str] | tuple[str, ...] | None = None,
 ) -> str:
     """Build a seller-filtered Liverpool URL from structured job fields.
 
@@ -227,6 +305,7 @@ def build_liverpool_url(
         page: Optional known Liverpool page.
         category: Legacy alias for ``page``.
         brand: Unsupported brand/facet selector. Use explicit ``url`` instead.
+        talla: Optional Zapatos-only Talla values. Supports one or more values.
 
     Returns:
         A Liverpool listing URL that filters to Liverpool as seller.
@@ -242,6 +321,27 @@ def build_liverpool_url(
         )
 
     page_value = _resolve_page_aliases(page, category)
+    talla_values = _normalize_talla_values(talla)
+    if talla_values:
+        if page_value is None:
+            raise ValueError("Liverpool talla filters require a page/category route.")
+        if page_value is not Page.zapatos_hombre:
+            raise ValueError(
+                "Liverpool talla filters are currently supported only for 'zapatos_hombre'."
+            )
+        if query and _query_value(query):
+            raise ValueError(
+                "Liverpool generated talla filters do not support query combinations yet."
+            )
+        try:
+            return _ZAPATOS_SELLER_TALLA_URLS[talla_values]
+        except KeyError as exc:
+            supported = ", ".join(" + ".join(combo) for combo in sorted(_ZAPATOS_SELLER_TALLA_URLS))
+            raise ValueError(
+                "Unsupported Liverpool seller+talla combination. Supported combinations: "
+                f"{supported}."
+            ) from exc
+
     if page_value is not None:
         return build_page_url(page_value, query=query)
 
@@ -254,6 +354,7 @@ def preview_liverpool_url(
     page: str | Page | None = None,
     category: str | Category | None = None,
     brand: Brand | str | None = None,
+    talla: str | list[str] | tuple[str, ...] | None = None,
     url: str | None = None,
     show_plp: bool = False,
 ) -> str:
@@ -264,6 +365,7 @@ def preview_liverpool_url(
         page: Optional Liverpool page name or enum member.
         category: Legacy alias for ``page``.
         brand: Unsupported generated brand/facet selector.
+        talla: Optional Zapatos-only Talla value(s).
         url: Optional explicit URL. When set, it is returned unchanged.
         show_plp: When true with a page, return its seller-filtered PLP URL.
 
@@ -290,7 +392,31 @@ def preview_liverpool_url(
         query=query,
         page=page_value,
         brand=brand,
+        talla=talla,
     )
+
+
+def build_zapatos_talla_url(
+    talla: str | list[str] | tuple[str, ...],
+    *,
+    include_seller: bool = False,
+) -> str:
+    """Build a seeded Liverpool Zapatos Talla URL from documented fixtures."""
+    talla_values = _normalize_talla_values(talla)
+    if include_seller:
+        mapping = _ZAPATOS_SELLER_TALLA_URLS
+        label = "seller+talla"
+    else:
+        mapping = _ZAPATOS_TALLA_URLS
+        label = "talla"
+    try:
+        return mapping[talla_values]
+    except KeyError as exc:
+        supported = ", ".join(" + ".join(combo) for combo in sorted(mapping))
+        raise ValueError(
+            f"Unsupported Liverpool Zapatos {label} combination. Supported combinations: "
+            f"{supported}."
+        ) from exc
 
 
 def build_page_url(page: str | Page, *, query: str | None = None) -> str:

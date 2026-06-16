@@ -186,6 +186,22 @@ class Page(Enum):
         canonical_url="https://www.liverpool.com.mx/tienda/nintendo/cat5030010",
         aliases=("Consolas y videojuegos Nintendo",),
     )
+    playstation = LiverpoolPage(
+        display_name="PlayStation",
+        kind=PageKind.landing,
+        breadcrumb=("Home", "Videojuegos", "PlayStation"),
+        slug="playstation",
+        category_id="CAT1161024",
+        canonical_url="https://www.liverpool.com.mx/tienda/playstation/cat1161024",
+    )
+    zapatos_hombre = LiverpoolPage(
+        display_name="Zapatos",
+        kind=PageKind.landing,
+        breadcrumb=("Home", "Hombre", "Zapatos"),
+        slug="zapatos",
+        category_id="CAT5040004",
+        canonical_url="https://www.liverpool.com.mx/tienda/zapatos/cat5040004",
+    )
     consolas_nintendo = LiverpoolPage(
         display_name="Consolas Nintendo",
         kind=PageKind.products,

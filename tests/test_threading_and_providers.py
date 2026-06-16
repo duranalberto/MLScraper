@@ -23,7 +23,7 @@ from scraper.runtime.orchestrator import Scrapper
 from utils.header_profiles import HEADER_PROFILES
 from utils.headers import _base_headers, get_random_header
 from utils import telegram
-from utils.telegram import _format_price_drop
+from utils.telegram import _format_new_item, _format_price_drop
 from provider.amazon.motor import Amazon
 from provider.amazon.urls import build_amazon_url
 from provider.liverpool.motor import Liverpool
@@ -404,25 +404,97 @@ class ProviderCycleSchedulerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramFormatterTests(unittest.TestCase):
+    def test_new_listing_preview_leads_with_product_title_and_price(self) -> None:
+        message = _format_new_item(
+            {
+                "job_id": "Nintendo Search",
+                "provider": "ml",
+                "title": "Nintendo 3DS Console",
+                "url": "https://example.test/item",
+                "price": 1500.0,
+                "datetime": "2026-05-25 09:30:42",
+            }
+        )
+
+        self.assertEqual(
+            message.splitlines()[0],
+            "🆕 <b>$1,500.00 MXN</b>  Nintendo 3DS Console",
+        )
+        self.assertNotIn("New listing:", message.splitlines()[0])
+        self.assertNotIn("━━━━━━━━", message)
+        self.assertIn("\n\n<i>Product</i>\n<b>Nintendo 3DS Console</b>", message)
+        self.assertIn("<i>Listing details</i>\n💰 Price: <b>$1,500.00 MXN</b>", message)
+        self.assertIn("🏪 Provider: <b>Mercado Libre</b>", message)
+        self.assertIn("🔎 Monitor: Nintendo Search", message)
+        self.assertIn("🕒 Found: 2026-05-25 09:30\n\n🔗", message)
+        self.assertNotIn("09:30:42", message)
+        self.assertIn('<a href="https://example.test/item">Open product</a>', message)
+
     def test_price_drop_message_uses_previous_and_new_price(self) -> None:
         message = _format_price_drop(
             {
-                "job_id": "Nintendo",
-                "title": "Nintendo 3DS",
+                "job_id": "Nintendo Search",
+                "provider": "az",
+                "title": "Nintendo 3DS Console",
                 "url": "https://example.test/item",
                 "previous_price": 2000.0,
                 "new_price": 1500.0,
                 "percent_change": "25.00",
-                "history": [{"datetime": "2026-01-01"}],
+                "datetime": "2026-01-01",
+                "last_updated": "2026-05-25 09:30:42",
             }
         )
 
         self.assertIsNotNone(message)
         assert message is not None
-        self.assertIn("$2,000.00", message)
-        self.assertIn("$1,500.00 MXN", message)
-        self.assertIn("Save $500.00", message)
-        self.assertIn("25.0% OFF", message)
+        self.assertEqual(
+            message.splitlines()[0],
+            "🔥 <b>25.0% OFF</b>  <s>$2,000.00</s> -> <b>$1,500.00 MXN</b>  Nintendo 3DS Console",
+        )
+        self.assertNotIn("price drop:", message.splitlines()[0])
+        self.assertNotIn("━━━━━━━━", message)
+        self.assertIn("\n\n<i>Product</i>\n<b>Nintendo 3DS Console</b>", message)
+        self.assertNotIn("Nintendo Search", message.splitlines()[0])
+        self.assertIn("<i>Price details</i>\nPrevious price: <s>$2,000.00 MXN</s>", message)
+        self.assertIn("Current price: <b>$1,500.00 MXN</b>", message)
+        self.assertIn("Savings: <b>$500.00 MXN</b>", message)
+        self.assertIn("Reduction from previous: <b>25.0%</b>", message)
+        self.assertIn("<i>Source</i>\n🏪 Provider: <b>Amazon</b>", message)
+        self.assertIn("🔎 Monitor: Nintendo Search\n\n🕒 Found:", message)
+        self.assertIn("Found: 2026-01-01", message)
+        self.assertIn("Updated: 2026-05-25 09:30", message)
+        self.assertIn("Updated: 2026-05-25 09:30\n\n🔗", message)
+        self.assertNotIn("09:30:42", message)
+        self.assertIn('<a href="https://example.test/item">Open product</a>', message)
+
+    def test_message_escapes_html_and_handles_missing_product_link(self) -> None:
+        message = _format_new_item(
+            {
+                "job_id": "Deals <today>",
+                "title": "TV & Soundbar <Bundle>",
+                "url": 'https://example.test/item?a=1&name="offer"',
+                "price": 100.0,
+            }
+        )
+        unavailable = _format_price_drop(
+            {
+                "job_id": "Deals",
+                "title": "TV",
+                "previous_price": 100.0,
+                "new_price": 80.0,
+                "percent_change": "20",
+                "history": [{"datetime": "older-price-record"}],
+            }
+        )
+
+        self.assertIn("TV &amp; Soundbar &lt;Bundle&gt;", message.splitlines()[0])
+        self.assertIn("Deals &lt;today&gt;", message)
+        self.assertIn("a=1&amp;name=&quot;offer&quot;", message)
+        self.assertIsNotNone(unavailable)
+        assert unavailable is not None
+        self.assertIn("Product link unavailable", unavailable)
+        self.assertNotIn("<a href=", unavailable)
+        self.assertNotIn("Updated:", unavailable)
 
 
 class ConfigPathResolutionTests(unittest.TestCase):
