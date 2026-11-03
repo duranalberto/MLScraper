@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 import re
 import urllib.parse
 
 import requests
+
+from utils.db import get_persistence_backend
 
 from .options import (
     Brand,
@@ -22,6 +25,7 @@ FILTER_URL = "https://www.liverpool.com.mx/api/plp/search"
 REQUEST_TIMEOUT_SECONDS = 15
 _SESSION: requests.Session | None = None
 _ORIGINAL_REQUESTS_POST = requests.post
+logger = logging.getLogger(__name__)
 
 
 def _get_session() -> requests.Session:
@@ -357,9 +361,16 @@ def _resolve_seller_filtered_segment(
     query: str = "",
     page_name: str = "",
 ) -> str:
-    """Resolve and validate a Liverpool seller-filtered encrypted URL segment."""
+    """Resolve and validate a Liverpool seller-filtered encrypted URL segment.
+
+    Persists successful resolutions in ``provider_url_cache`` when a database
+    backend is active, and falls back to the cached segment if the live
+    Liverpool endpoint transiently fails.
+    """
     page = Page[page_name] if page_name else None
     query_value = _query_value(query)
+    cache_key = f"{query_value}::{page_name}"
+    backend = get_persistence_backend(auto_init=False)
 
     try:
         post_fn = _get_session().post if requests.post is _ORIGINAL_REQUESTS_POST else requests.post
@@ -372,10 +383,26 @@ def _resolve_seller_filtered_segment(
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:
+        if backend is not None:
+            cached = backend.get_cached_url("lv", cache_key)
+            if cached is not None and cached[0]:
+                logger.warning(
+                    "Liverpool resolver request failed for %r; falling back to cached segment.",
+                    cache_key,
+                )
+                return cached[0]
         raise LiverpoolResolverError(
             "Liverpool seller-filter resolver request failed. Provide an explicit url."
         ) from exc
     except ValueError as exc:
+        if backend is not None:
+            cached = backend.get_cached_url("lv", cache_key)
+            if cached is not None and cached[0]:
+                logger.warning(
+                    "Liverpool resolver returned invalid JSON for %r; falling back to cached segment.",
+                    cache_key,
+                )
+                return cached[0]
         raise LiverpoolResolverError(
             "Liverpool seller-filter resolver returned invalid JSON. Provide an explicit url."
         ) from exc
@@ -391,7 +418,18 @@ def _resolve_seller_filtered_segment(
     if page is not None:
         _validate_page_navigation(main_content, page)
 
-    return _extract_encrypted_url(main_content)
+    encrypted_url = _extract_encrypted_url(main_content)
+    if backend is not None:
+        try:
+            backend.set_cached_url(
+                provider="lv",
+                cache_key=cache_key,
+                resolved_segment=encrypted_url,
+                resolved_url=f"{BASE_URL}/{encrypted_url}",
+            )
+        except Exception:
+            pass
+    return encrypted_url
 
 
 def build_liverpool_url(

@@ -6,18 +6,32 @@
   },
   "remoteEnv": {
     "EDITOR": "code --wait",
-    "VISUAL": "code --wait"
+    "VISUAL": "code --wait",
+    "DB_HOST": "127.0.0.1",
+    "DB_PORT": "3306",
+    "DB_USER": "mlscraper",
+    "DB_PASSWORD": "mlscraper",
+    "DB_NAME": "mlscraper"
   },
+  "mounts": [
+    "source=mlscraper-mysql-data,target=/var/lib/mysql,type=volume"
+  ],
   "forwardPorts": [
-    80
+    80,
+    3306
   ],
   "portsAttributes": {
     "80": {
       "label": "MLScraper FastAPI",
       "onAutoForward": "notify"
+    },
+    "3306": {
+      "label": "MLScraper MySQL",
+      "onAutoForward": "silent"
     }
   },
   "postCreateCommand": "if [ -d .git ]; then pre-commit install; fi",
+  "postStartCommand": "/usr/local/bin/ensure-mysql.sh",
   "customizations": {
     "vscode": {
       "settings": {

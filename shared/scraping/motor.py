@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime as datetime_lib
 import random
+import time
 from abc import ABC
 from traceback import format_exc
 from typing import Any, Callable, List, Optional, Tuple
@@ -13,10 +15,12 @@ from urllib.parse import urlparse
 from aiohttp import ClientSession
 
 from shared.articles.article import Article
+from shared.articles.catalog import ProviderCatalog, get_provider_catalog
 from shared.articles.lifecycle import ArticleLifecycle
 from shared.articles.repository import ArticleRepository
 from shared.articles.status import Status
 from shared.articles.stream import Stream
+from utils.db import ScrapeRunRecord, get_persistence_backend
 
 from . import motor_config
 from .fetchers import get_fetcher
@@ -66,10 +70,15 @@ class Motor(ABC):
         page_strategy: PageScrapeStrategy | None = None,
         repository: ArticleRepository | None = None,
         lifecycle: ArticleLifecycle | None = None,
+        catalog: ProviderCatalog | None = None,
+        query_text: str | None = None,
+        filter_config: dict[str, Any] | None = None,
     ) -> None:
         self.job_id = job_id
         self.url = url
         self.storage_path = storage_path
+        self.query_text = query_text
+        self.filter_config = filter_config
         self.active = Stream(Status.active)
         self.on_hold = Stream(Status.on_hold)
         self.finished = Stream(Status.finished)
@@ -77,11 +86,37 @@ class Motor(ABC):
         self.blocked_until: float = 0.0
         self.blocked_reason: str | None = None
         self._scrape_incomplete: bool = False
+        self._last_page_fetched_epoch: float | None = None
+        self._cycle_pages_fetched: int = 0
+        self._cycle_new_count: int = 0
+        self._cycle_updated_count: int = 0
+        self._cycle_missing_count: int = 0
         self.page_strategy: PageScrapeStrategy | None = (
             page_strategy if page_strategy is not None else self.PAGE_STRATEGY
         )
 
         self._apply_config()
+
+        resolved_catalog = catalog
+        if resolved_catalog is None and repository is None and lifecycle is None:
+            backend = get_persistence_backend()
+            if backend is not None:
+                resolved_catalog = get_provider_catalog(self.provider_key, backend=backend)
+
+        self.catalog: ProviderCatalog | None = resolved_catalog
+        self.search_id: int = 0
+        if self.catalog is not None:
+            self.catalog.ensure_hydrated(self.create_article)
+            search_rec = self.catalog.register_search(
+                job_id=self.job_id,
+                storage_path=self.storage_path,
+                resolved_url=self.url,
+                query_text=self.query_text,
+                filter_config=self.filter_config,
+                is_enabled=True,
+            )
+            self.search_id = search_rec.id
+
         self._repository = repository or ArticleRepository(
             self.storage_path,
             self.active,
@@ -89,6 +124,8 @@ class Motor(ABC):
             self.finished,
             self.create_article,
             self.debug,
+            catalog=self.catalog,
+            search_id=self.search_id,
         )
         self._lifecycle = lifecycle or ArticleLifecycle(
             self.active,
@@ -96,6 +133,8 @@ class Motor(ABC):
             self.finished,
             self.create_article,
             self.HOLD_MISS_THRESHOLD,
+            catalog=self.catalog,
+            search_id=self.search_id,
         )
 
         self.load_from_file()
@@ -163,6 +202,12 @@ class Motor(ABC):
         current_url: Optional[str] = self.url
         loop = asyncio.get_running_loop()
         self._scrape_incomplete = False
+        self._cycle_pages_fetched = 0
+        self._cycle_new_count = 0
+        self._cycle_updated_count = 0
+        self._cycle_missing_count = 0
+        cycle_started_at = str(datetime_lib.now())
+        cycle_start_clock = time.time()
 
         if self.blocked_until > loop.time():
             if self.debug:
@@ -203,6 +248,10 @@ class Motor(ABC):
             logger.error("Scrape for '%s' crashed:\n%s", self.job_id, format_exc())
             return
 
+        self._last_cycle_started_at = cycle_started_at
+        self._last_cycle_start_clock = cycle_start_clock
+        self._last_cycle_scraped_count = len(results)
+
         if results or self.active.get_list() or self.on_hold.get_list():
             if not self._scrape_incomplete:
                 self._reconcile_missing(results)
@@ -212,8 +261,8 @@ class Motor(ABC):
                     self.job_id,
                 )
 
-            await self.save_to_file()
             self.is_first_run = False
+            await self.save_to_file()
 
             if not silent:
                 logger.info(
@@ -221,6 +270,8 @@ class Motor(ABC):
                     self.job_id,
                     len(results),
                 )
+        elif self.catalog is not None and self.catalog.backend is not None and self.search_id > 0:
+            await self.save_to_file()
 
     def scrape_page(self, body: dict) -> Tuple[List[Any], Optional[str]]:
         """Execute the configured :class:`PageScrapeStrategy` and return ``(items, next_url)``."""
@@ -314,6 +365,9 @@ class Motor(ABC):
                 )
             return None
 
+        self._last_page_fetched_epoch = time.time()
+        self._cycle_pages_fetched += 1
+
         try:
             body = {"content": html, "url": current_url}
             parsed_page = self.scrape_page(body)
@@ -357,6 +411,10 @@ class Motor(ABC):
 
             if article is not None:
                 results.append(article)
+                if is_new:
+                    self._cycle_new_count += 1
+                if is_updated:
+                    self._cycle_updated_count += 1
 
                 if caller and (is_new or is_updated):
                     b_type = "new_element" if is_new else "is_updated"
@@ -378,7 +436,19 @@ class Motor(ABC):
         item: Any,
         to_status: Status = Status.none,
         at_beginning: bool = True,
+        *,
+        fetched_epoch: float | None = None,
     ) -> Tuple[Optional[Article], bool, bool]:
+        resolved_epoch = (
+            fetched_epoch if fetched_epoch is not None else self._last_page_fetched_epoch
+        )
+        if self.catalog is not None:
+            return self._lifecycle.save(
+                item,
+                to_status,
+                at_beginning,
+                fetched_epoch=resolved_epoch,
+            )
         return self._lifecycle.save(item, to_status, at_beginning)
 
     @staticmethod
@@ -401,6 +471,43 @@ class Motor(ABC):
         return self._repository._load_record(record, seen_identifiers)
 
     async def save_to_file(self) -> None:
+        if self.catalog is not None and self.catalog.backend is not None and self.search_id > 0:
+            try:
+                now_loop = asyncio.get_running_loop().time()
+            except RuntimeError:
+                now_loop = 0.0
+            cycle_status = (
+                "blocked"
+                if self.blocked_reason and self.blocked_until > now_loop
+                else ("incomplete" if self._scrape_incomplete else "ok")
+            )
+            started_at = getattr(self, "_last_cycle_started_at", str(datetime_lib.now()))
+            start_clock = getattr(self, "_last_cycle_start_clock", time.time())
+            scraped_count = getattr(self, "_last_cycle_scraped_count", len(self.active))
+            run_record = ScrapeRunRecord(
+                search_id=self.search_id,
+                provider=self.provider_key,
+                started_at=started_at,
+                finished_at=str(datetime_lib.now()),
+                duration_s=round(max(0.0, time.time() - start_clock), 4),
+                pages_fetched=self._cycle_pages_fetched,
+                scraped_count=scraped_count,
+                new_count=self._cycle_new_count,
+                updated_count=self._cycle_updated_count,
+                missing_count=self._cycle_missing_count,
+                status=cycle_status,
+                error_reason=self.blocked_reason,
+            )
+            await self._repository.save(
+                self.get_all(),
+                is_first_run=self.is_first_run,
+                last_status=cycle_status,
+                blocked_reason=self.blocked_reason,
+                global_status_updates=self._lifecycle.consume_pending_global_updates(),
+                scrape_run=run_record,
+            )
+            return
+
         await self._repository.save(self.get_all())
 
     def _dump_state(self) -> str:
@@ -419,6 +526,16 @@ class Motor(ABC):
         payload = article.dump()
         payload["job_id"] = self.job_id
         payload["provider"] = self.provider_key
+        if article.db_id is not None:
+            payload["article_id"] = article.db_id
+        if self.search_id > 0:
+            payload["search_id"] = self.search_id
+        if article.initial_price is not None:
+            payload["initial_price"] = article.initial_price
+        if article.lowest_price is not None:
+            payload["lowest_price"] = article.lowest_price
+        if article.highest_price is not None:
+            payload["highest_price"] = article.highest_price
         return payload
 
     def print_compare(self) -> None:
@@ -483,6 +600,7 @@ class Motor(ABC):
     def _reconcile_missing(self, results: List[Article]) -> None:
         missing_from_active = self.active - results
         missing_from_hold = self.on_hold - results
+        self._cycle_missing_count = len(missing_from_active) + len(missing_from_hold)
 
         for article in missing_from_active:
             self.save(article, to_status=Status.on_hold, at_beginning=False)

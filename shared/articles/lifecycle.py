@@ -1,13 +1,27 @@
+"""Article lifecycle state transitions supporting both local streams and store catalogs."""
+
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Optional, Tuple
 
 from .article import Article
 from .status import Status
 from .stream import Stream
 
+if TYPE_CHECKING:
+    from .catalog import ProviderCatalog
+
 
 class ArticleLifecycle:
+    """Manage active, on_hold, and finished transitions for a search motor.
+
+    When ``catalog`` is provided, article observation and status transitions
+    are synchronized through the store-wide :class:`ProviderCatalog` Identity
+    Map (enforcing First-Writer-Wins deduplication, Compare-And-Swap updates,
+    and Strict Status Dominance across searches). When ``catalog`` is ``None``,
+    transitions operate purely on the local streams.
+    """
+
     def __init__(
         self,
         active: Stream,
@@ -15,18 +29,32 @@ class ArticleLifecycle:
         finished: Stream,
         create_article: Callable[[dict], Optional[Article]],
         hold_miss_threshold: int,
+        *,
+        catalog: ProviderCatalog | None = None,
+        search_id: int = 0,
     ) -> None:
         self.active = active
         self.on_hold = on_hold
         self.finished = finished
         self.create_article = create_article
         self.hold_miss_threshold = hold_miss_threshold
+        self.catalog = catalog
+        self.search_id = search_id
+        self.pending_global_updates: list[tuple[int, str, int, dict[str, Any] | None]] = []
+
+    def consume_pending_global_updates(self) -> list[tuple[int, str, int, dict[str, Any] | None]]:
+        """Return and clear pending store-global status updates accumulated during reconciliation."""
+        updates = list(self.pending_global_updates)
+        self.pending_global_updates.clear()
+        return updates
 
     def save(
         self,
         item: Any,
         to_status: Status = Status.none,
         at_beginning: bool = True,
+        *,
+        fetched_epoch: float | None = None,
     ) -> Tuple[Optional[Article], bool, bool]:
         is_new = is_updated = False
 
@@ -35,6 +63,35 @@ class ArticleLifecycle:
             return None, False, False
 
         target = to_status if to_status != Status.none else Status.active
+
+        if self.catalog is not None:
+            if target == Status.active:
+                return self.catalog.observe_article(
+                    search_id=self.search_id,
+                    incoming=article,
+                    active=self.active,
+                    on_hold=self.on_hold,
+                    finished=self.finished,
+                    at_beginning=at_beginning,
+                    fetched_epoch=fetched_epoch,
+                )
+
+            if target in (Status.on_hold, Status.finished):
+                canonical, global_update = self.catalog.transition_search_article(
+                    search_id=self.search_id,
+                    article=article,
+                    target_status=target,
+                    hold_miss_threshold=self.hold_miss_threshold,
+                    active=self.active,
+                    on_hold=self.on_hold,
+                    finished=self.finished,
+                    at_beginning=at_beginning,
+                )
+                if global_update is not None:
+                    self.pending_global_updates.append(global_update)
+                return canonical, False, False
+
+            return article, False, False
 
         if target == Status.active:
             return self._save_active(article, at_beginning)

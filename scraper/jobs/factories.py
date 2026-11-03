@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from typing import Any
 import unicodedata
 
 from provider.amazon.motor import Amazon
@@ -69,6 +70,39 @@ def _explicit_url(url: str | None) -> str | None:
     return value or None
 
 
+def _attach_search_metadata(
+    motor: Any,
+    *,
+    query_text: str | None = None,
+    filter_config: dict[str, Any] | None = None,
+) -> Any:
+    """Attach structured query and filter metadata to a constructed motor and its catalog."""
+    cleaned_filters = (
+        {
+            k: v
+            for k, v in filter_config.items()
+            if v is not None and v != "" and v != [] and v != ()
+        }
+        if filter_config
+        else None
+    )
+    if hasattr(motor, "query_text"):
+        motor.query_text = query_text
+    if hasattr(motor, "filter_config"):
+        motor.filter_config = cleaned_filters
+    catalog = getattr(motor, "catalog", None)
+    if catalog is not None and hasattr(motor, "job_id") and hasattr(motor, "storage_path"):
+        catalog.register_search(
+            job_id=motor.job_id,
+            storage_path=motor.storage_path,
+            resolved_url=getattr(motor, "url", None),
+            query_text=query_text,
+            filter_config=cleaned_filters,
+            is_enabled=True,
+        )
+    return motor
+
+
 def _ml_factory(
     job_id: str,
     url: str | None = None,
@@ -95,7 +129,10 @@ def _ml_factory(
         )
     if explicit_url:
         path = _storage_path("mercado_libre", job_id)
-        return MercadoLibre(job_id, explicit_url, storage_path=path)
+        return _attach_search_metadata(
+            MercadoLibre(job_id, explicit_url, storage_path=path),
+            filter_config={"explicit_url": True},
+        )
 
     url = build_mercado_libre_url(
         query=query,
@@ -106,7 +143,15 @@ def _ml_factory(
 
     qualifier = "-".join(option.name for option in (seller, category, state) if option is not None)
     path = _storage_path("mercado_libre", job_id, qualifier)
-    return MercadoLibre(job_id, url, storage_path=path)
+    return _attach_search_metadata(
+        MercadoLibre(job_id, url, storage_path=path),
+        query_text=query,
+        filter_config={
+            "seller": seller.name if seller is not None else None,
+            "category": category.name if category is not None else None,
+            "state": state.name if state is not None else None,
+        },
+    )
 
 
 def _az_factory(
@@ -138,7 +183,10 @@ def _az_factory(
         )
     if explicit_url:
         path = _storage_path("amazon", job_id)
-        return Amazon(job_id, explicit_url, storage_path=path)
+        return _attach_search_metadata(
+            Amazon(job_id, explicit_url, storage_path=path),
+            filter_config={"explicit_url": True},
+        )
 
     url = build_amazon_url(
         query=query,
@@ -152,7 +200,14 @@ def _az_factory(
         if option is not None
     )
     path = _storage_path("amazon", job_id, qualifier)
-    return Amazon(job_id, url, storage_path=path)
+    return _attach_search_metadata(
+        Amazon(job_id, url, storage_path=path),
+        query_text=query,
+        filter_config={
+            "seller": seller.name if seller != AmazonSeller.none else None,
+            "brand": brand.name if brand is not None else None,
+        },
+    )
 
 
 def _lv_factory(
@@ -183,7 +238,10 @@ def _lv_factory(
         )
     if explicit_url:
         path = _storage_path("liverpool", job_id)
-        return Liverpool(job_id, explicit_url, storage_path=path)
+        return _attach_search_metadata(
+            Liverpool(job_id, explicit_url, storage_path=path),
+            filter_config={"explicit_url": True},
+        )
 
     url = build_liverpool_url(
         query=query,
@@ -194,7 +252,18 @@ def _lv_factory(
     )
 
     path = _storage_path("liverpool", job_id)
-    return Liverpool(job_id, url, storage_path=path)
+    resolved_page = page or category
+    return _attach_search_metadata(
+        Liverpool(job_id, url, storage_path=path),
+        query_text=query,
+        filter_config={
+            "page": (
+                resolved_page.name if isinstance(resolved_page, LiverpoolPage) else resolved_page
+            ),
+            "brand": brand.name if isinstance(brand, LiverpoolBrand) else brand,
+            "talla": list(talla) if isinstance(talla, (list, tuple)) else talla,
+        },
+    )
 
 
 def _ph_factory(
@@ -221,7 +290,10 @@ def _ph_factory(
         )
     if explicit_url:
         path = _storage_path("palacio_de_hierro", job_id)
-        return PalacioDeHierro(job_id, explicit_url, storage_path=path)
+        return _attach_search_metadata(
+            PalacioDeHierro(job_id, explicit_url, storage_path=path),
+            filter_config={"explicit_url": True},
+        )
 
     url = build_palacio_url(
         query=query,
@@ -230,7 +302,14 @@ def _ph_factory(
     )
 
     path = _storage_path("palacio_de_hierro", job_id)
-    return PalacioDeHierro(job_id, url, storage_path=path)
+    return _attach_search_metadata(
+        PalacioDeHierro(job_id, url, storage_path=path),
+        query_text=query,
+        filter_config={
+            "page": page.name if isinstance(page, PalacioPage) else page,
+            "brands": list(brands) if isinstance(brands, (list, tuple)) else brands,
+        },
+    )
 
 
 def register_default_factories(registry: MotorRegistry) -> None:

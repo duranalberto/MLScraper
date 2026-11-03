@@ -1,82 +1,68 @@
 # Architecture
 
-MLScraper is a scheduled scraper service wrapped by a small FastAPI app.
+MLScraper is a scheduled scraper service wrapped by a FastAPI application with
+a hybrid in-memory + MySQL persistence layer and an asynchronous queue-backed
+observer notification system.
 
 ## Runtime Flow
 
-1. `app.py` creates the FastAPI app.
+1. `app.py` creates the FastAPI app (or runs the `preview-url` CLI subcommand).
 2. The FastAPI lifespan hook starts `Scrapper.run()` as a background task.
 3. `Scrapper` loads configured motors from `config/jobs.yaml`.
-4. Each provider gets an independent scheduler loop.
-5. Each `Motor` fetches pages, parses provider results, reconciles product
-   state, persists JSON, and emits notification events.
-6. Telegram helpers send messages when credentials are configured.
+4. Each store/provider (`az`, `lv`, `ml`, `ph`) hydrates a shared in-memory
+   `ProviderCatalog` Identity Map from MySQL (`utils/db.py`) and attaches
+   canonical `Article` references into each `Motor`'s search streams.
+5. Each provider runs an independent scheduler loop with bounded concurrency.
+6. Each `Motor` fetches pages (`aiohttp` or Playwright `browser`), parses pages
+   via its `PageScrapeStrategy`, synchronizes discoveries/updates through
+   `ProviderCatalog` (First-Writer-Wins & Compare-And-Swap), reconciles missing
+   items in $O(N + M)$ in-memory set operations, flushes cycle state and
+   `scrape_runs` telemetry to MySQL, and enqueues notification events onto
+   `NotificationDispatcher`.
+7. `NotificationDispatcher` drains its `asyncio.Queue` in the background,
+   evaluates notification rules, deduplicates/logs events in
+   `notification_events`, and fans out alerts to registered
+   `NotificationObserver`s (such as `TelegramObserver`).
 
 `GET /health` returns the service status plus per-provider cycle and queue
 details. It returns `503` while the scraper is still starting.
 
 ## Core Modules
 
-- `app.py`: FastAPI entrypoint and health endpoint.
-- `scraper/runtime/orchestrator.py`: public scraper orchestrator; delegates
-  provider concurrency, health aggregation, and notification routing to focused
-  helpers.
-- `scraper/runtime/config.py`: scheduler-level config loader for
-  `config/scrapper.yaml`.
-- `shared/scraping/motor.py`: public shared motor base; delegates config,
-  persistence, lifecycle transitions, and missing-item reconciliation to focused
-  helpers.
+- `app.py`: FastAPI entrypoint, `/health` endpoint, and `preview-url` CLI subcommand.
+- `scraper/runtime/orchestrator.py`: scraper orchestrator scheduling per-provider
+  scrape loops and managing `NotificationDispatcher`.
+- `scraper/runtime/notifications.py`: `NotificationDispatcher` (`asyncio.Queue`
+  producer-consumer) and `NotificationObserver` protocol.
+- `scraper/runtime/telegram_notifications.py`: `TelegramObserver` and
+  `TelegramNotifier`.
+- `shared/scraping/motor.py`: shared motor base coordinating fetchers,
+  `PageScrapeStrategy`, `ProviderCatalog`, `ArticleLifecycle`, and
+  `ArticleRepository`.
+- `shared/scraping/page_strategy.py`: `PageScrapeStrategy` protocol,
+  `PageScrapeResult`, and `FallbackPageScrapeStrategy`.
 - `shared/scraping/fetchers.py`: `aiohttp` and Playwright browser fetch
-  strategies.
-- `shared/articles/article.py`: persisted product and history data classes.
-- `scraper/jobs/registry.py`: provider factory registry.
-- `scraper/jobs/factories.py`: job-to-motor construction and storage path naming.
-- `scraper/jobs/loader.py`: YAML job loading, validation, and enum coercion.
-- `scraper/runtime/`: provider concurrency, health, and notification helpers.
-- `utils/file_manager.py`: safe JSON reads and atomic writes below `DATA_PATH`.
-- `utils/headers.py`: request header rendering over shared browser profiles.
-- `utils/telegram.py`: optional Telegram notification integration.
+  strategies with an Open/Closed fetcher registry.
+- `shared/articles/article.py`: `Article` model with automatic price watermarks
+  (`initial_price`, `lowest_price`, `highest_price`) and history management.
+- `shared/articles/catalog.py`: per-store `ProviderCatalog` Identity Map,
+  Compare-And-Swap synchronization, and Strict Status Dominance calculation.
+- `shared/articles/lifecycle.py`: `ArticleLifecycle` state machine.
+- `shared/articles/repository.py`: `ArticleRepository` supporting relational
+  catalog persistence and JSON file storage.
+- `utils/db.py`: 8-table MySQL / SQLite relational persistence backends
+  (`MySQLPersistenceBackend`, `SQLitePersistenceBackend`).
 
 ## Provider Boundaries
 
-Each provider owns its URL construction, parsing, enums/options, selectors, and
-provider-specific fallbacks. Larger providers can split parser helpers inside
-their provider package.
+Each provider owns its URL construction, `PageScrapeStrategy` implementation,
+enums/options, selectors, and provider-specific fallbacks inside `provider/<name>/`:
+
+- `az`: Amazon (`provider/amazon/`)
+- `ml`: Mercado Libre (`provider/mercado_libre/`)
+- `lv`: Liverpool (`provider/liverpool/`)
+- `ph`: Palacio de Hierro (`provider/palacio_de_hierro/`)
 
 Shared contracts used by both provider implementations and scraper
 orchestration live in `shared/`. `shared/` must not import from `provider/` or
-`scraper/`. Scraper-owned job assembly and runtime orchestration live in
 `scraper/`.
-
-Current provider keys:
-
-- `az`: Amazon
-- `ml`: Mercado Libre
-- `lv`: Liverpool
-- `ph`: Palacio de Hierro
-
-## Fetching
-
-Motors use `FETCH_STRATEGY` from `config/motors.yaml`.
-
-- `aiohttp` is the default lightweight HTTP fetcher.
-- `browser` uses Playwright Chromium for pages that need browser rendering or
-  selector-based readiness checks.
-
-Browser mode can mark a motor as blocked when configured selectors or URL
-fragments indicate a gate, timeout, or anti-bot page.
-
-## Persistence
-
-Product records are stored as JSON lists below `DATA_PATH`, defaulting to
-`./data`. Writes use a temporary file and keep a `.bak` copy of the previous
-file when possible.
-
-Factory-generated paths group data by provider, for example:
-
-```text
-amazon/macbook__amazon-mx.json
-mercado_libre/pokemon-ds__consolas.json
-liverpool/laptops.json
-palacio_de_hierro/macbook.json
-```

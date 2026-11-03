@@ -11,6 +11,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    default-mysql-client \
+    default-mysql-server \
     git \
     less \
     openssh-client \
@@ -43,6 +45,9 @@ RUN git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git /root/.oh-my-zsh 
     } > /root/.zshrc
 
 WORKDIR /workspaces/MLScraper
+
+COPY .devcontainer/ensure-mysql.sh /usr/local/bin/ensure-mysql.sh
+RUN chmod +x /usr/local/bin/ensure-mysql.sh
 
 COPY requirements.txt requirements-dev.txt ./
 

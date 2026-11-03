@@ -23,6 +23,13 @@ from enum import Enum
 import logging
 from typing import Any, Awaitable, Callable, Optional, Protocol, Sequence, runtime_checkable
 
+from utils.db import (
+    NotificationEventRecord,
+    PersistenceBackend,
+    get_persistence_backend,
+    run_db_async,
+)
+
 PRICE_DROP_THRESHOLD_PERCENT = -14.0
 
 
@@ -166,6 +173,7 @@ class NotificationDispatcher:
         *,
         observers: Sequence[NotificationObserver] = (),
         max_queue_size: int = 0,
+        backend: PersistenceBackend | None = None,
     ) -> None:
         self.logger = logger
         self._observers: list[NotificationObserver] = list(observers)
@@ -173,6 +181,7 @@ class NotificationDispatcher:
             maxsize=max_queue_size
         )
         self._worker_task: asyncio.Task[None] | None = None
+        self._backend = backend
 
     @property
     def observers(self) -> tuple[NotificationObserver, ...]:
@@ -280,8 +289,45 @@ class NotificationDispatcher:
         observer: NotificationObserver,
         event: NotificationEvent,
     ) -> None:
+        observer_name = type(observer).__name__.lower()
+        if observer_name.endswith("observer"):
+            observer_name = observer_name[: -len("observer")] or observer_name
+
+        backend = self._backend or get_persistence_backend(auto_init=False)
+        article_id = int(event.element.get("article_id") or 0)
+        search_id_raw = event.element.get("search_id")
+        search_id = int(search_id_raw) if search_id_raw and int(search_id_raw) > 0 else None
+        new_price = parse_price(event.element.get("new_price", event.element.get("price"))) or 0.0
+        old_price = parse_price(event.element.get("previous_price"))
+        pct_raw = parse_price(event.element.get("percent_change"))
+
+        if backend is not None and article_id > 0:
+            already_sent = await run_db_async(
+                backend.has_notification_event,
+                article_id=article_id,
+                event_type=event.event_type.value,
+                new_price=new_price,
+                observer_name=observer_name,
+            )
+            if already_sent:
+                return
+
         try:
             await observer.notify(event)
+            if backend is not None and article_id > 0:
+                await run_db_async(
+                    backend.record_notification_event,
+                    NotificationEventRecord(
+                        article_id=article_id,
+                        search_id=search_id,
+                        event_type=event.event_type.value,
+                        old_price=old_price,
+                        new_price=new_price,
+                        percent_change=pct_raw,
+                        observer_name=observer_name,
+                        delivery_status="sent",
+                    ),
+                )
         except Exception as exc:
             self.logger.error(
                 "Notification observer %s failed for %s: %s",
@@ -289,6 +335,21 @@ class NotificationDispatcher:
                 event.event_type.value,
                 exc,
             )
+            if backend is not None and article_id > 0:
+                await run_db_async(
+                    backend.record_notification_event,
+                    NotificationEventRecord(
+                        article_id=article_id,
+                        search_id=search_id,
+                        event_type=event.event_type.value,
+                        old_price=old_price,
+                        new_price=new_price,
+                        percent_change=pct_raw,
+                        observer_name=observer_name,
+                        delivery_status="failed",
+                        error_message=str(exc),
+                    ),
+                )
 
 
 async def broadcast(

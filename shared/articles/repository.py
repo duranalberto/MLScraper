@@ -1,17 +1,21 @@
-"""Article persistence repository supporting injectable storage readers and writers."""
+"""Article persistence repository supporting relational DB catalogs and JSON file storage."""
 
 from __future__ import annotations
 
 import asyncio
 from json import dumps as json_dumps
 import logging
-from typing import Any, Awaitable, Callable, Iterable, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Optional
 
+from utils.db import ScrapeRunRecord, run_db_async
 from utils.file_manager import read_json_file, write_in_file
 
 from .article import Article
 from .status import Status
 from .stream import Stream
+
+if TYPE_CHECKING:
+    from .catalog import ProviderCatalog
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +24,7 @@ StorageWriter = Callable[[str, str], Awaitable[None]]
 
 
 class ArticleRepository:
-    """Persist and restore article streams with injectable I/O callables."""
+    """Persist and restore article streams using either a :class:`ProviderCatalog` or JSON files."""
 
     def __init__(
         self,
@@ -33,6 +37,8 @@ class ArticleRepository:
         *,
         reader: StorageReader | None = None,
         writer: StorageWriter | None = None,
+        catalog: ProviderCatalog | None = None,
+        search_id: int = 0,
     ) -> None:
         self.storage_path = storage_path
         self.active = active
@@ -42,8 +48,30 @@ class ArticleRepository:
         self.debug = debug
         self._reader = reader
         self._writer = writer
+        self.catalog = catalog
+        self.search_id = search_id
 
     def load(self) -> None:
+        """Hydrate ``active``, ``on_hold``, and ``finished`` from the catalog DB or JSON file."""
+        if self.catalog is not None and self.catalog.backend is not None and self._reader is None:
+            self.catalog.ensure_hydrated(self.create_article)
+            loaded = self.catalog.hydrate_search_streams(
+                search_id=self.search_id,
+                active=self.active,
+                on_hold=self.on_hold,
+                finished=self.finished,
+            )
+            if self.debug:
+                logger.info(
+                    "Loaded %d article(s) from DB catalog for '%s' (active=%d, on_hold=%d, finished=%d).",
+                    loaded,
+                    self.storage_path,
+                    len(self.active),
+                    len(self.on_hold),
+                    len(self.finished),
+                )
+            return
+
         seen_identifiers: set[str] = set()
         loaded = 0
         read_fn = self._reader or read_json_file
@@ -54,12 +82,36 @@ class ArticleRepository:
                 continue
 
             loaded += 1
-            if article.status == Status.finished:
-                self.finished.add(article, at_beginning=False)
-            elif article.status == Status.on_hold:
-                self.on_hold.add(article, at_beginning=False)
+            if self.catalog is not None:
+                search_status = article.status.value
+                search_misses = article.hold_misses if article.status == Status.on_hold else 0
+                canonical = self.catalog.articles_by_id.get(article.identifier)
+                if canonical is None:
+                    self.catalog.articles_by_id[article.identifier] = article
+                    canonical = article
+                self.catalog._set_search_membership(
+                    search_id=self.search_id,
+                    article=canonical,
+                    status=search_status,
+                    hold_misses=search_misses,
+                    seen_at=str(article.last_updated or article.datetime),
+                )
+                self.catalog._place_in_search_stream(
+                    canonical,
+                    search_status=search_status,
+                    active=self.active,
+                    on_hold=self.on_hold,
+                    finished=self.finished,
+                    at_beginning=False,
+                )
+                self.catalog.recompute_global_status(canonical.identifier)
             else:
-                self.active.add(article, at_beginning=False)
+                if article.status == Status.finished:
+                    self.finished.add(article, at_beginning=False)
+                elif article.status == Status.on_hold:
+                    self.on_hold.add(article, at_beginning=False)
+                else:
+                    self.active.add(article, at_beginning=False)
 
         if self.debug:
             logger.info(
@@ -119,10 +171,32 @@ class ArticleRepository:
 
         return article
 
-    async def save(self, articles: Iterable[Article]) -> None:
+    async def save(
+        self,
+        articles: Iterable[Article],
+        *,
+        is_first_run: bool = False,
+        last_status: str = "ok",
+        blocked_reason: str | None = None,
+        global_status_updates: list[tuple[int, str, int, dict[str, Any] | None]] | None = None,
+        scrape_run: ScrapeRunRecord | None = None,
+    ) -> None:
         self.active.order_by_time()
         self.on_hold.order_by_time()
         self.finished.order_by_time()
+
+        if self.catalog is not None and self.catalog.backend is not None and self._writer is None:
+            await run_db_async(
+                self.catalog.flush_search_cycle,
+                search_id=self.search_id,
+                is_first_run=is_first_run,
+                last_status=last_status,
+                blocked_reason=blocked_reason,
+                global_status_updates=global_status_updates,
+                scrape_run=scrape_run,
+            )
+            return
+
         snapshot = list(articles)
         loop = asyncio.get_running_loop()
         dumped = await loop.run_in_executor(None, self.dump, snapshot)

@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from shared.scraping.motor import Motor
+from utils.db import get_persistence_backend
 
 from .factories import register_default_factories
 from .loader import DEFAULT_CONFIG_PATH, load_jobs
@@ -39,4 +40,11 @@ def get_motors(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list[Motor]:
 
     _REGISTRY.clear_entries()
     register_entries(entries)
-    return build_motors()
+    motors = build_motors()
+    backend = get_persistence_backend()
+    if backend is not None:
+        enabled_paths = {
+            motor.storage_path for motor in motors if getattr(motor, "storage_path", None)
+        }
+        backend.mark_unlisted_searches_disabled(enabled_paths)
+    return motors

@@ -70,6 +70,23 @@ class StatusHistory:
         )
 
 
+def _coerce_numeric_price(value: Any) -> Optional[float]:
+    """Convert a numeric or string price into a float when possible."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.replace(",", "").strip()
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
 @dataclass
 class Article:
     identifier: str
@@ -82,11 +99,66 @@ class Article:
     status_history: List[StatusHistory] = field(default_factory=list)
     hold_misses: int = 0
     last_updated: Optional[str] = None
+    initial_price: Optional[float] = None
+    lowest_price: Optional[float] = None
+    lowest_price_at: Optional[str] = None
+    highest_price: Optional[float] = None
+    highest_price_at: Optional[str] = None
+    last_fetched_epoch: float = 0.0
+    version: int = 1
+    db_id: Optional[int] = None
 
     def __post_init__(self) -> None:
         self.history = self._load_history(self.history)
         self.status_history = self._load_status_history(self.status_history)
         self.hold_misses = self._load_hold_misses(self.hold_misses)
+        self.last_fetched_epoch = float(self.last_fetched_epoch or 0.0)
+        self.version = max(1, int(self.version or 1))
+        self._initialize_price_watermarks()
+
+    def _initialize_price_watermarks(self) -> None:
+        """Initialize initial, lowest, and highest price watermarks from history and current price."""
+        samples: list[tuple[float, str]] = []
+        for entry in reversed(self.history):
+            parsed = _coerce_numeric_price(entry.price)
+            if parsed is not None:
+                samples.append((parsed, str(entry.datetime)))
+
+        current_numeric = _coerce_numeric_price(self.price)
+        current_ts = str(self.last_updated or self.datetime)
+        if current_numeric is not None:
+            samples.append((current_numeric, current_ts))
+
+        if not samples:
+            return
+
+        if self.initial_price is None:
+            self.initial_price = samples[0][0]
+        else:
+            coerced_init = _coerce_numeric_price(self.initial_price)
+            self.initial_price = coerced_init if coerced_init is not None else samples[0][0]
+
+        if self.lowest_price is None:
+            low_price, low_ts = min(samples, key=lambda item: item[0])
+            self.lowest_price = low_price
+            self.lowest_price_at = self.lowest_price_at or low_ts
+        else:
+            coerced_low = _coerce_numeric_price(self.lowest_price)
+            if coerced_low is not None:
+                self.lowest_price = coerced_low
+            if self.lowest_price_at is None:
+                self.lowest_price_at = str(self.datetime)
+
+        if self.highest_price is None:
+            high_price, high_ts = max(samples, key=lambda item: item[0])
+            self.highest_price = high_price
+            self.highest_price_at = self.highest_price_at or high_ts
+        else:
+            coerced_high = _coerce_numeric_price(self.highest_price)
+            if coerced_high is not None:
+                self.highest_price = coerced_high
+            if self.highest_price_at is None:
+                self.highest_price_at = str(self.datetime)
 
     def __str__(self) -> str:
         return f"[{self.datetime}]  {self.title}  ${self.price}"
@@ -163,6 +235,21 @@ class Article:
             self.last_updated = str(datetime_lib.now())
             self.history.insert(0, ah)
             self.history = self.history[:MAX_HISTORY]
+
+        self.version += 1
+        if "price" in changes:
+            new_numeric = _coerce_numeric_price(self.price)
+            update_ts = str(self.last_updated or self.datetime)
+            if new_numeric is not None:
+                if self.initial_price is None:
+                    old_numeric = _coerce_numeric_price(old_values.get("price"))
+                    self.initial_price = old_numeric if old_numeric is not None else new_numeric
+                if self.lowest_price is None or new_numeric < self.lowest_price:
+                    self.lowest_price = new_numeric
+                    self.lowest_price_at = update_ts
+                if self.highest_price is None or new_numeric > self.highest_price:
+                    self.highest_price = new_numeric
+                    self.highest_price_at = update_ts
 
         return True
 
