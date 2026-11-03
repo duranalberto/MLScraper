@@ -1,38 +1,109 @@
+"""Mercado Libre search and store listing page parser and page-scrape strategies."""
+
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 from urllib.parse import urlparse, urlunparse
 
 from bs4 import BeautifulSoup, Tag
 
+from shared.scraping.page_strategy import PageScrapeResult
+
 from .urls import get_identifier
 
-
-@dataclass(frozen=True)
-class ParseResult:
-    items: list[dict]
-    next_url: str | None
-    blocked_reason: str | None = None
-    incomplete_reason: str | None = None
+ParseResult = PageScrapeResult
 
 
-def parse_search_page(html: str, current_url: str) -> ParseResult:
-    soup = BeautifulSoup(html, "html.parser")
+class MercadoLibreDomPageStrategy:
+    """Page-scrape strategy for server/browser-rendered Mercado Libre DOM listings."""
+
+    def parse_page(
+        self,
+        content: str,
+        url: str,
+        *,
+        job_id: str = "",
+    ) -> PageScrapeResult:
+        """Parse Mercado Libre HTML DOM result cards into a :class:`PageScrapeResult`."""
+        soup = BeautifulSoup(content or "", "html.parser")
+        blocked = blocked_page_reason(soup)
+        if blocked:
+            return PageScrapeResult([], None, blocked_reason=blocked, incomplete=True)
+
+        items, next_url = parse_dom_results(soup, url)
+        if not items:
+            return PageScrapeResult(
+                [],
+                None,
+                incomplete_reason="mercado_libre_results_root_missing",
+                incomplete=True,
+            )
+        return PageScrapeResult(items, next_url)
+
+
+class MercadoLibreNordicPageStrategy:
+    """Page-scrape strategy for Mercado Libre's ``__NORDIC_RENDERING_CTX__`` state."""
+
+    def parse_page(
+        self,
+        content: str,
+        url: str,
+        *,
+        job_id: str = "",
+    ) -> PageScrapeResult:
+        """Parse Mercado Libre embedded Nordic state into a :class:`PageScrapeResult`."""
+        soup = BeautifulSoup(content or "", "html.parser")
+        blocked = blocked_page_reason(soup)
+        if blocked:
+            return PageScrapeResult([], None, blocked_reason=blocked, incomplete=True)
+
+        items, next_url = parse_nordic_state(soup)
+        if not items:
+            return PageScrapeResult(
+                [],
+                None,
+                incomplete_reason="mercado_libre_results_root_missing",
+                incomplete=True,
+            )
+        return PageScrapeResult(items, next_url)
+
+
+class MercadoLibreSearchPageStrategy:
+    """Composite strategy parsing Mercado Libre DOM results with Nordic JSON fallback."""
+
+    def parse_page(
+        self,
+        content: str,
+        url: str,
+        *,
+        job_id: str = "",
+    ) -> PageScrapeResult:
+        """Parse a Mercado Libre search page using DOM cards and Nordic state fallback."""
+        return parse_search_page(content, url)
+
+
+def parse_search_page(html: str, current_url: str) -> PageScrapeResult:
+    """Parse a Mercado Libre HTML page into product items and next-page state."""
+    soup = BeautifulSoup(html or "", "html.parser")
 
     blocked_reason = blocked_page_reason(soup)
     if blocked_reason:
-        return ParseResult([], None, blocked_reason=blocked_reason)
+        return PageScrapeResult([], None, blocked_reason=blocked_reason, incomplete=True)
 
     items, next_url = parse_dom_results(soup, current_url)
     if not items:
         items, next_url = parse_nordic_state(soup)
 
     if not items:
-        return ParseResult([], None, incomplete_reason="mercado_libre_results_root_missing")
+        return PageScrapeResult(
+            [],
+            None,
+            incomplete_reason="mercado_libre_results_root_missing",
+            incomplete=True,
+        )
 
-    return ParseResult(items, next_url)
+    return PageScrapeResult(items, next_url)
 
 
 def parse_dom_results(soup: BeautifulSoup, current_url: str) -> tuple[list[dict], str | None]:

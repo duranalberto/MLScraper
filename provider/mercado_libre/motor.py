@@ -1,15 +1,21 @@
-import logging
+"""Mercado Libre provider motor implementation."""
+
+from __future__ import annotations
 
 from bs4 import BeautifulSoup
+
 from shared.scraping.motor import Motor
+from shared.scraping.page_strategy import PageScrapeStrategy
 
 from . import parser as ml_parser
-
-logger = logging.getLogger(__name__)
+from .parser import MercadoLibreSearchPageStrategy
 
 
 class MercadoLibre(Motor):
+    """Mercado Libre scraping motor supporting DOM and Nordic JSON state strategies."""
+
     PROVIDER_KEY = "ml"
+    PAGE_STRATEGY = MercadoLibreSearchPageStrategy()
 
     def __init__(
         self,
@@ -17,39 +23,14 @@ class MercadoLibre(Motor):
         url: str,
         *,
         storage_path: str,
-    ):
-        super().__init__(job_id, url, storage_path=storage_path)
-
-    def scrape_page(self, body):
-        result = ml_parser.parse_search_page(
-            body.get("content", ""),
-            body.get("url", self.url),
+        page_strategy: PageScrapeStrategy | None = None,
+    ) -> None:
+        super().__init__(
+            job_id,
+            url,
+            storage_path=storage_path,
+            page_strategy=page_strategy or self.PAGE_STRATEGY,
         )
-        if result.blocked_reason:
-            self._scrape_incomplete = True
-            self.mark_blocked(result.blocked_reason, self.BLOCKED_BACKOFF_SECONDS)
-            if self.debug:
-                logger.warning(
-                    "Mercado Libre returned a blocked/gated page (%s) for '%s' at %s.",
-                    result.blocked_reason,
-                    self.job_id,
-                    body.get("url", self.url),
-                )
-            return result.items, None
-
-        if result.incomplete_reason:
-            self._scrape_incomplete = True
-            self.blocked_reason = result.incomplete_reason
-            if self.debug:
-                logger.warning(
-                    "Mercado Libre returned an incomplete page (%s) for '%s' at %s.",
-                    result.incomplete_reason,
-                    self.job_id,
-                    body.get("url", self.url),
-                )
-            return result.items, None
-
-        return result.items, result.next_url
 
     def _parse_dom_results(self, soup: BeautifulSoup, current_url: str):
         return ml_parser.parse_dom_results(soup, current_url)

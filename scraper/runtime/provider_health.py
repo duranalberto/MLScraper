@@ -1,3 +1,5 @@
+"""Provider and orchestrator health state calculation."""
+
 from __future__ import annotations
 
 from collections import Counter
@@ -42,11 +44,22 @@ def refresh_provider_health(
     provider_cycle_health: dict[str, dict[str, Any]],
     default_provider_concurrency: int,
 ) -> None:
+    """Update ``health['providers']`` in a single $O(M + P \\log P)$ pass."""
     providers = set(provider_job_counts)
     providers.update(provider_limits)
     providers.update(provider_active)
     providers.update(provider_waiting)
     providers.update(provider_cycle_health)
+
+    blocked_counts: Counter[str] = Counter()
+    reasons_by_provider: dict[str, set[str]] = {}
+    for motor in motors:
+        reason = getattr(motor, "blocked_reason", None)
+        if reason:
+            provider_key = motor.provider_key
+            blocked_counts[provider_key] += 1
+            reasons_by_provider.setdefault(provider_key, set()).add(str(reason))
+
     health["providers"] = {
         provider: {
             **ensure_provider_cycle_health(provider_cycle_health, provider),
@@ -54,17 +67,8 @@ def refresh_provider_health(
             "job_count": provider_job_counts.get(provider, 0),
             "active_jobs": max(0, provider_active.get(provider, 0)),
             "queued_jobs": max(0, provider_waiting.get(provider, 0)),
-            "blocked_jobs": sum(
-                1 for motor in motors if motor.provider_key == provider and motor.blocked_reason
-            ),
-            "block_reasons": sorted(
-                {
-                    motor.blocked_reason
-                    for motor in motors
-                    if motor.provider_key == provider and motor.blocked_reason
-                }
-                - {None}
-            ),
+            "blocked_jobs": blocked_counts.get(provider, 0),
+            "block_reasons": sorted(reasons_by_provider.get(provider, ())),
         }
         for provider in sorted(providers)
     }

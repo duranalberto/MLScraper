@@ -1,15 +1,15 @@
 import logging
 from argparse import ArgumentParser
+from asyncio import create_task as asyncio_create_task
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from uvicorn import run as uvicorn_run
-from asyncio import create_task as asyncio_create_task
 from fastapi import FastAPI, HTTPException
-from contextlib import asynccontextmanager
+from uvicorn import run as uvicorn_run
 
 from scraper.jobs.loader import DEFAULT_CONFIG_PATH
-from scraper.runtime.url_preview import preview_job_url
 from scraper.runtime.orchestrator import Scrapper
+from scraper.runtime.url_preview import preview_job_url, supported_preview_providers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -52,7 +52,11 @@ def _build_parser() -> ArgumentParser:
         "preview-url",
         help="Generate one job URL from config/jobs.yaml without running the scraper.",
     )
-    preview.add_argument("--provider", required=True, choices=("ml", "az", "lv", "ph"))
+    preview.add_argument(
+        "--provider",
+        required=True,
+        choices=supported_preview_providers(),
+    )
     preview.add_argument("--job-id", required=True)
     preview.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     return parser

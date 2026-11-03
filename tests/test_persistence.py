@@ -131,3 +131,30 @@ class ArticleRepositoryTests(unittest.TestCase):
         written = call.args[1]
         self.assertNotIn("search_term", written)
         self.assertIn('"identifier": "old"', written)
+
+    def test_repository_supports_injected_reader_and_writer_callables(self) -> None:
+        active = Stream(Status.active)
+        on_hold = Stream(Status.on_hold)
+        finished = Stream(Status.finished)
+        written_calls: list[tuple[str, str]] = []
+
+        async def custom_writer(path: str, content: str) -> None:
+            written_calls.append((path, content))
+
+        repository = ArticleRepository(
+            "custom/items.json",
+            active,
+            on_hold,
+            finished,
+            Article.create,
+            debug=False,
+            reader=lambda _path: [{"identifier": "injected", "title": "Item", "price": 42.0}],
+            writer=custom_writer,
+        )
+        repository.load()
+        self.assertEqual([article.identifier for article in active], ["injected"])
+
+        asyncio.run(repository.save(active))
+        self.assertEqual(len(written_calls), 1)
+        self.assertEqual(written_calls[0][0], "custom/items.json")
+        self.assertIn('"identifier": "injected"', written_calls[0][1])

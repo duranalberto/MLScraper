@@ -2,14 +2,17 @@
 Orchestrator — runs all motors on a schedule and routes notification events.
 """
 
+from __future__ import annotations
+
 import asyncio
-import logging
 from collections import Counter
+import logging
 from time import gmtime, strftime, time
-from typing import Any
+from typing import Any, Sequence
 
 from scraper.jobs.generator import get_motors
 from scraper.runtime.config import RuntimeConfig, load_runtime_config
+from scraper.runtime.notifications import NotificationDispatcher, NotificationObserver
 from scraper.runtime.provider_health import (
     ensure_provider_cycle_health,
     initial_health,
@@ -22,6 +25,7 @@ from scraper.runtime.provider_runtime import (
     scrape_with_limit,
 )
 from scraper.runtime.telegram_notifications import TelegramNotifier
+from shared.scraping.fetchers import close_fetchers
 from shared.scraping.motor import Motor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -29,15 +33,24 @@ logger = logging.getLogger(__name__)
 
 
 class Scrapper:
+    """Runtime orchestrator scheduling per-provider scrape loops and async notifications."""
+
     def __init__(
         self,
         *,
         runtime_config: RuntimeConfig | None = None,
-        notifier: TelegramNotifier | None = None,
+        notifier: NotificationDispatcher | TelegramNotifier | None = None,
+        observers: Sequence[NotificationObserver] | None = None,
         motors: list[Motor] | None = None,
     ) -> None:
         self.runtime_config = runtime_config or load_runtime_config()
-        self.notifier = notifier or TelegramNotifier(logger)
+        self.notifier: NotificationDispatcher = notifier or TelegramNotifier(
+            logger,
+            observers=observers,
+        )
+        if notifier is not None and observers:
+            for observer in observers:
+                self.notifier.add_observer(observer)
         self.sleep_time: float = 400
 
         self.motors: list[Motor] = get_motors() if motors is None else motors
@@ -71,6 +84,10 @@ class Scrapper:
                     stats["configured_limit"],
                 )
 
+    def add_observer(self, observer: NotificationObserver) -> None:
+        """Register an additional :class:`NotificationObserver` on the dispatcher."""
+        self.notifier.add_observer(observer)
+
     async def run(self) -> None:
         if not self.motors:
             self.health["status"] = "idle_no_motors"
@@ -80,6 +97,9 @@ class Scrapper:
 
         logger.info("Scraper service started.")
         self.health["status"] = "running"
+        if hasattr(self.notifier, "start"):
+            self.notifier.start()
+
         provider_tasks = [
             asyncio.create_task(
                 self._run_provider_loop(provider, motors),
@@ -87,7 +107,15 @@ class Scrapper:
             )
             for provider, motors in self._motors_by_provider.items()
         ]
-        await asyncio.gather(*provider_tasks)
+        try:
+            await asyncio.gather(*provider_tasks)
+        finally:
+            for task in provider_tasks:
+                if not task.done():
+                    task.cancel()
+            if hasattr(self.notifier, "stop"):
+                await self.notifier.stop(drain=False)
+            await close_fetchers()
 
     async def _run_provider_loop(self, provider: str, motors: list[Motor]) -> None:
         backoff = self.runtime_config.backoff_initial

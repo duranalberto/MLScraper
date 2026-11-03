@@ -1,31 +1,11 @@
-"""
-utils/telegram.py
-
-Telegram notification helpers.
-
-Changes from previous version
-──────────────────────────────
-• Credentials are now loaded from config/telegram.yaml (gitignored).
-  The old utils/secret.py import is gone.
-
-• Guards against missing / blank credentials: if api_token or chat_id
-  are absent the module logs a one-time warning at import time and all
-  send_* functions become no-ops.  The app never tries to reach Telegram
-  without valid config.
-
-• Both public send_* functions are now async and delegate the blocking
-  requests.post call to run_in_executor so they never stall the event loop.
-
-• _load_config() raises clear, descriptive errors for the two most common
-  mistakes: file not found and missing keys.
-"""
+"""Telegram notification helpers and formatting utilities."""
 
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import datetime
 from html import escape
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -36,19 +16,33 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _CONFIG_PATH = _REPO_ROOT / "config" / "telegram.yaml"
-_PROVIDER_NAMES = {
+_PROVIDER_NAMES: dict[str, str] = {
     "az": "Amazon",
     "lv": "Liverpool",
     "ml": "Mercado Libre",
     "ph": "Palacio de Hierro",
 }
+_SESSION: requests.Session | None = None
+
+
+def register_provider_display_name(provider_key: str, display_name: str) -> None:
+    """Register or update a human-readable provider display name for notifications."""
+    if provider_key and display_name:
+        _PROVIDER_NAMES[provider_key] = display_name
+
+
+def _get_session() -> requests.Session:
+    """Return a shared HTTP session for connection reuse across Telegram calls."""
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = requests.Session()
+    return _SESSION
 
 
 def _load_config() -> tuple[str, str]:
-    """
-    Read api_token and chat_id from config/telegram.yaml.
+    """Read ``api_token`` and ``chat_id`` from ``config/telegram.yaml``.
 
-    Returns ("", "") with a warning when the file is absent or the keys
+    Returns ``("", "")`` with a warning when the file is absent or the keys
     are blank — callers treat empty strings as "notifications disabled".
     Never raises; config problems must not crash the application.
     """
@@ -72,7 +66,7 @@ def _load_config() -> tuple[str, str]:
 
     if not token or not chat:
         logger.warning(
-            "'%s' is missing api_token or chat_id. " "Telegram notifications are disabled.",
+            "'%s' is missing api_token or chat_id. Telegram notifications are disabled.",
             _CONFIG_PATH,
         )
         return "", ""
@@ -86,7 +80,7 @@ _API_URL = f"https://api.telegram.org/bot{_API_TOKEN}/sendMessage" if _ENABLED e
 
 
 async def send_new_to_telegram(element: dict) -> None:
-    """Send a new-listing notification.  No-op when credentials are missing."""
+    """Send a new-listing notification. No-op when credentials are missing."""
     if not _ENABLED:
         return
     message = _format_new_item(element)
@@ -94,7 +88,7 @@ async def send_new_to_telegram(element: dict) -> None:
 
 
 async def send_price_drop_to_telegram(element: dict) -> None:
-    """Send a price-drop notification.  No-op when credentials are missing."""
+    """Send a price-drop notification. No-op when credentials are missing."""
     if not _ENABLED:
         return
     message = _format_price_drop(element)
@@ -103,18 +97,15 @@ async def send_price_drop_to_telegram(element: dict) -> None:
 
 
 async def _send_async(message: str) -> None:
-    """
-    Dispatch message in a thread-pool executor so the async event loop
-    is never blocked by the synchronous requests.post call.
-    """
+    """Dispatch message in a thread-pool executor so the event loop is never blocked."""
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _send_sync, message)
 
 
 def _send_sync(message: str) -> None:
-    """Blocking send — always called from a thread, never from the event loop."""
+    """Blocking send — always called from a worker thread, never on the event loop."""
     try:
-        response = requests.post(
+        response = _get_session().post(
             _API_URL,
             json={
                 "chat_id": _CHAT_ID,

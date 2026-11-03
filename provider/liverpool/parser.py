@@ -1,4 +1,4 @@
-"""Liverpool search and category listing page parser.
+"""Liverpool search and category listing page parser and page-scrape strategies.
 
 Supports both Liverpool's Next.js App Router React Server Component (RSC)
 payloads (``self.__next_f.push`` chunks containing ``initialResults``) and the
@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from bs4 import BeautifulSoup
+
+from shared.scraping.page_strategy import PageScrapeResult
 
 from .urls import append_page_segment, current_page_number
 
@@ -25,25 +26,70 @@ _NEXT_F_STRING_RE = re.compile(
 )
 _RSC_UNDEFINED_RE = re.compile(r":\s*\"\$undefined\"")
 
-
-@dataclass(frozen=True)
-class ParseResult:
-    """Parsed Liverpool listing items and pagination state.
-
-    Args:
-        items: Extracted product dictionaries with ``identifier``, ``title``,
-            ``price``, and ``url``.
-        next_url: URL of the next page when more pages remain, or ``None``.
-        incomplete: ``True`` when no recognizable listing payload could be
-            parsed from the HTML document.
-    """
-
-    items: list[dict[str, Any]]
-    next_url: str | None
-    incomplete: bool = False
+ParseResult = PageScrapeResult
 
 
-def parse_listing_page(html: str, current_url: str, *, job_id: str = "") -> ParseResult:
+class LiverpoolRscPageStrategy:
+    """Page-scrape strategy for Liverpool's Next.js App Router RSC payload."""
+
+    def parse_page(
+        self,
+        content: str,
+        url: str,
+        *,
+        job_id: str = "",
+    ) -> PageScrapeResult:
+        """Parse an RSC Liverpool HTML document into a :class:`PageScrapeResult`."""
+        soup = BeautifulSoup(content or "", "html.parser")
+        listing_data = _extract_rsc_initial_results(soup)
+        if listing_data is None:
+            return PageScrapeResult(
+                items=[],
+                next_url=None,
+                incomplete_reason="liverpool_rsc_payload_missing",
+                incomplete=True,
+            )
+        return _parse_listing_data(listing_data, url, job_id=job_id)
+
+
+class LiverpoolNextDataPageStrategy:
+    """Page-scrape strategy for Liverpool's legacy ``__NEXT_DATA__`` payload."""
+
+    def parse_page(
+        self,
+        content: str,
+        url: str,
+        *,
+        job_id: str = "",
+    ) -> PageScrapeResult:
+        """Parse a legacy ``__NEXT_DATA__`` Liverpool HTML document."""
+        soup = BeautifulSoup(content or "", "html.parser")
+        listing_data = _extract_legacy_next_data(soup, job_id=job_id)
+        if listing_data is None:
+            return PageScrapeResult(
+                items=[],
+                next_url=None,
+                incomplete_reason="liverpool_next_data_missing",
+                incomplete=True,
+            )
+        return _parse_listing_data(listing_data, url, job_id=job_id)
+
+
+class LiverpoolListingPageStrategy:
+    """Composite strategy supporting both RSC and legacy ``__NEXT_DATA__`` Liverpool pages."""
+
+    def parse_page(
+        self,
+        content: str,
+        url: str,
+        *,
+        job_id: str = "",
+    ) -> PageScrapeResult:
+        """Parse a Liverpool HTML page using RSC extraction with ``__NEXT_DATA__`` fallback."""
+        return parse_listing_page(content, url, job_id=job_id)
+
+
+def parse_listing_page(html: str, current_url: str, *, job_id: str = "") -> PageScrapeResult:
     """Parse a Liverpool HTML page into product records and next-page URL.
 
     Args:
@@ -52,8 +98,8 @@ def parse_listing_page(html: str, current_url: str, *, job_id: str = "") -> Pars
         job_id: Optional job identifier used in diagnostic log messages.
 
     Returns:
-        A ``ParseResult`` containing extracted product records, optional next
-        page URL, and an ``incomplete`` flag when the page lacks a valid payload.
+        A :class:`PageScrapeResult` containing extracted product records, optional
+        next page URL, and an ``incomplete`` flag when the page lacks a valid payload.
     """
     soup = BeautifulSoup(html or "", "html.parser")
     listing_data = _extract_rsc_initial_results(soup)
@@ -66,15 +112,35 @@ def parse_listing_page(html: str, current_url: str, *, job_id: str = "") -> Pars
             "Liverpool may have changed their page structure.",
             job_id,
         )
-        return ParseResult(items=[], next_url=None, incomplete=True)
+        return PageScrapeResult(
+            items=[],
+            next_url=None,
+            incomplete_reason="liverpool_payload_missing",
+            incomplete=True,
+        )
 
+    return _parse_listing_data(listing_data, current_url, job_id=job_id)
+
+
+def _parse_listing_data(
+    listing_data: dict[str, Any],
+    current_url: str,
+    *,
+    job_id: str = "",
+) -> PageScrapeResult:
+    """Convert extracted Liverpool ``listing_data`` into a :class:`PageScrapeResult`."""
     records = listing_data.get("records")
     if not isinstance(records, list):
         logger.error(
             "[Liverpool] Unexpected JSON structure for '%s' — 'records' list not found.",
             job_id,
         )
-        return ParseResult(items=[], next_url=None, incomplete=True)
+        return PageScrapeResult(
+            items=[],
+            next_url=None,
+            incomplete_reason="liverpool_records_missing",
+            incomplete=True,
+        )
 
     items: list[dict[str, Any]] = []
     for record in records:
@@ -90,7 +156,7 @@ def parse_listing_page(html: str, current_url: str, *, job_id: str = "") -> Pars
             )
 
     next_url = _extract_next_url(listing_data, current_url)
-    return ParseResult(items=items, next_url=next_url, incomplete=False)
+    return PageScrapeResult(items=items, next_url=next_url, incomplete=False)
 
 
 def _extract_rsc_initial_results(soup: BeautifulSoup) -> dict[str, Any] | None:

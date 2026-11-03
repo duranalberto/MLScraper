@@ -9,6 +9,10 @@ from aiohttp import ClientSession
 
 from shared.articles.article import Article
 from shared.scraping.motor import Motor
+from shared.scraping.page_strategy import (
+    FallbackPageScrapeStrategy,
+    PageScrapeResult,
+)
 
 
 class ScriptedMotor(Motor):
@@ -279,3 +283,51 @@ class MotorUtilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(motor._retry_after_delay("bad"), 60.0)
         self.assertEqual(motor._retry_after_delay("-1"), 0.0)
         self.assertEqual(motor._retry_after_delay("120"), 30.0)
+
+
+class PageScrapeStrategyTests(unittest.IsolatedAsyncioTestCase):
+    def test_fallback_strategy_returns_first_non_empty_result_or_stops_on_block(self) -> None:
+        class EmptyStrategy:
+            def parse_page(self, content: str, url: str, *, job_id: str = "") -> PageScrapeResult:
+                return PageScrapeResult(items=[], next_url=None, incomplete=True)
+
+        class HitStrategy:
+            def parse_page(self, content: str, url: str, *, job_id: str = "") -> PageScrapeResult:
+                return PageScrapeResult(
+                    items=[{"identifier": "id-1", "title": "Item", "price": 99.0}],
+                    next_url="https://example.test/page-2",
+                )
+
+        class BlockedStrategy:
+            def parse_page(self, content: str, url: str, *, job_id: str = "") -> PageScrapeResult:
+                return PageScrapeResult(
+                    items=[],
+                    next_url=None,
+                    blocked_reason="captcha_gate",
+                    incomplete=True,
+                )
+
+        fallback = FallbackPageScrapeStrategy([EmptyStrategy(), HitStrategy()])
+        result = fallback.parse_page("<html></html>", "https://example.test")
+        self.assertEqual(len(result.items), 1)
+        self.assertEqual(result.next_url, "https://example.test/page-2")
+        self.assertFalse(result.is_incomplete)
+
+        blocked_fallback = FallbackPageScrapeStrategy([BlockedStrategy(), HitStrategy()])
+        blocked_result = blocked_fallback.parse_page("<html></html>", "https://example.test")
+        self.assertEqual(blocked_result.blocked_reason, "captcha_gate")
+        self.assertEqual(blocked_result.items, [])
+        self.assertTrue(blocked_result.is_incomplete)
+
+    async def test_browser_fetch_strategy_does_not_open_aiohttp_client_session(self) -> None:
+        motor = make_motor([([{"identifier": "one", "title": "One", "price": 10.0}], None)])
+        motor.FETCH_STRATEGY = "browser"
+        motor.save_to_file = AsyncMock()  # type: ignore[method-assign]
+
+        with patch(
+            "shared.scraping.motor.ClientSession",
+            side_effect=AssertionError("ClientSession should not be created for browser strategy"),
+        ):
+            await motor.scrape(silent=True)
+
+        self.assertEqual([article.identifier for article in motor.active], ["one"])

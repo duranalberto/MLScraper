@@ -20,6 +20,18 @@ from .options import (
 BASE_URL = "https://www.liverpool.com.mx/tienda"
 FILTER_URL = "https://www.liverpool.com.mx/api/plp/search"
 REQUEST_TIMEOUT_SECONDS = 15
+_SESSION: requests.Session | None = None
+_ORIGINAL_REQUESTS_POST = requests.post
+
+
+def _get_session() -> requests.Session:
+    """Return a shared HTTP session for Liverpool resolver requests."""
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = requests.Session()
+    return _SESSION
+
+
 TALLA_REFINEMENT_NAME = "attributes.rzlv_tallaRopa"
 TALLA_ENRICH_REFINEMENT_NAME = "attributes.enrichAI_Talla"
 TALLA_FILTER_IDS = {
@@ -350,7 +362,8 @@ def _resolve_seller_filtered_segment(
     query_value = _query_value(query)
 
     try:
-        response = requests.post(
+        post_fn = _get_session().post if requests.post is _ORIGINAL_REQUESTS_POST else requests.post
+        response = post_fn(
             FILTER_URL,
             json=_resolver_payload(query=query_value, page=page),
             headers=_resolver_headers(query=query_value, page=page),

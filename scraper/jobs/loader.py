@@ -5,43 +5,14 @@ YAML Job Catalogue Loader
 ─────────────────────────
 Loads scraping job entries from a YAML file and coerces provider-specific
 string values (category, seller, and provider page names) into their proper
-enum types.
-
-Design decisions
-────────────────
-• The YAML file uses plain strings for enum fields ("amazon_mx", "consolas")
-  so the file stays human-readable without importing Python enums.
-  Coercion happens here, once, at load time.
-
-• All validation errors are reported together (not short-circuited) so
-  a misconfigured file surfaces every problem in one pass.
-
-• Unknown keys are passed through untouched — the factory layer decides
-  which kwargs it actually uses.
-
-• The loader is intentionally free of Motor/factory imports to keep the
-  dependency direction clean: loader → enums only.
-
-Edge cases handled
-──────────────────
-• Missing or empty YAML file               → returns [] with a warning
-• File not found                           → FileNotFoundError with clear message
-• Malformed YAML syntax                    → YAMLError with file + line info
-• `jobs` key missing or not a list         → ValueError
-• Entry is not a dict                      → entry skipped with a warning
-• Entry missing required `provider` key   → entry skipped with a warning
-• Unknown provider-specific enum string   → entry skipped with a warning
-                                              (unless explicit non-blank `url` is set)
-• `job_id` is missing or blank             → entry skipped with a warning
-• `search_term` legacy key is present      → entry skipped with a warning
-• duplicate `(provider, job_id)` entries   → ValueError
+enum types using an Open/Closed provider field-coercer registry.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -59,6 +30,17 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "jobs.yaml"
+
+ProviderFieldCoercer = Callable[[dict, dict], dict | None]
+_PROVIDER_FIELD_COERCERS: dict[str, ProviderFieldCoercer] = {}
+
+
+def register_field_coercer(provider: str, coercer: ProviderFieldCoercer) -> None:
+    """Register a YAML field coercer for ``provider`` (Open/Closed extension point)."""
+    key = provider.strip()
+    if not key:
+        raise ValueError("Provider key cannot be blank.")
+    _PROVIDER_FIELD_COERCERS[key] = coercer
 
 
 def _coerce_enum(raw: str, entry: dict, enum_type, field_name: str):
@@ -145,94 +127,111 @@ def _coerce_liverpool_talla(raw: Any, entry: dict) -> str | list[str] | None:
     return None
 
 
-def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
-    """Coerce provider-owned YAML fields without creating shared filter inputs."""
-    provider = clean["provider"]
-
+def _coerce_ml_fields(clean: dict, entry: dict) -> dict | None:
     if "category" in clean:
-        if provider == "ml":
-            coerced = _coerce_enum(str(clean["category"]), entry, MercadoLibreCategory, "category")
-            if coerced is None:
-                return None
-            clean["category"] = coerced
+        coerced = _coerce_enum(str(clean["category"]), entry, MercadoLibreCategory, "category")
+        if coerced is None:
+            return None
+        clean["category"] = coerced
 
-    if provider == "ml" and "state" in clean:
+    if "state" in clean:
         state = _coerce_enum(str(clean["state"]), entry, MercadoLibreState, "state")
         if state is None:
             return None
         clean["state"] = state
 
-    if provider == "lv":
-        page_value = None
-        if "page" in clean:
-            page_value = _coerce_liverpool_page(str(clean["page"]), entry, "page")
-            if page_value is None:
-                return None
-            clean["page"] = page_value
+    if "seller" in clean:
+        seller = _coerce_enum(str(clean["seller"]), entry, MercadoLibreSeller, "seller")
+        if seller is None:
+            return None
+        clean["seller"] = seller
 
-        if "category" in clean:
-            category_value = _coerce_liverpool_page(str(clean["category"]), entry, "category")
-            if category_value is None:
-                return None
-            if page_value is not None and page_value != category_value:
-                logger.warning(
-                    "Liverpool entry %r has conflicting 'page' and legacy 'category' values.",
-                    entry,
-                )
-                return None
-            clean["page"] = category_value
-            clean.pop("category", None)
+    return clean
 
-        if "talla" in clean:
-            talla = _coerce_liverpool_talla(clean["talla"], entry)
-            if talla is None:
-                return None
-            clean["talla"] = talla
 
-    if provider == "ph":
-        if "page" in clean:
-            page_value = _coerce_palacio_page(str(clean["page"]), entry, "page")
-            if page_value is None:
-                return None
-            clean["page"] = page_value
-
-        if "brands" in clean:
-            brands = _coerce_palacio_brands(clean["brands"], entry)
-            if brands is None:
-                return None
-            clean["brands"] = brands
-
-    if provider == "az" and "brand" in clean:
+def _coerce_az_fields(clean: dict, entry: dict) -> dict | None:
+    if "brand" in clean:
         brand = _coerce_enum(str(clean["brand"]), entry, AmazonBrand, "brand")
         if brand is None:
             return None
         clean["brand"] = brand
 
     if "seller" in clean:
-        if provider == "az":
-            coerced = _coerce_enum(str(clean["seller"]), entry, AmazonSeller, "seller")
-            if coerced is None:
-                return None
-            clean["seller"] = coerced
-        elif provider == "ml":
-            coerced = _coerce_enum(
-                str(clean["seller"]),
-                entry,
-                MercadoLibreSeller,
-                "seller",
-            )
-            if coerced is None:
-                return None
-            clean["seller"] = coerced
-        elif provider == "lv":
-            clean.pop("seller")
-            logger.warning(
-                "Liverpool job %r includes unsupported 'seller'; generated Liverpool URLs "
-                "always filter to Liverpool seller. Use explicit 'url' for custom sellers.",
-                clean["job_id"],
-            )
+        seller = _coerce_enum(str(clean["seller"]), entry, AmazonSeller, "seller")
+        if seller is None:
+            return None
+        clean["seller"] = seller
 
     return clean
+
+
+def _coerce_lv_fields(clean: dict, entry: dict) -> dict | None:
+    page_value = None
+    if "page" in clean:
+        page_value = _coerce_liverpool_page(str(clean["page"]), entry, "page")
+        if page_value is None:
+            return None
+        clean["page"] = page_value
+
+    if "category" in clean:
+        category_value = _coerce_liverpool_page(str(clean["category"]), entry, "category")
+        if category_value is None:
+            return None
+        if page_value is not None and page_value != category_value:
+            logger.warning(
+                "Liverpool entry %r has conflicting 'page' and legacy 'category' values.",
+                entry,
+            )
+            return None
+        clean["page"] = category_value
+        clean.pop("category", None)
+
+    if "talla" in clean:
+        talla = _coerce_liverpool_talla(clean["talla"], entry)
+        if talla is None:
+            return None
+        clean["talla"] = talla
+
+    if "seller" in clean:
+        clean.pop("seller")
+        logger.warning(
+            "Liverpool job %r includes unsupported 'seller'; generated Liverpool URLs "
+            "always filter to Liverpool seller. Use explicit 'url' for custom sellers.",
+            clean["job_id"],
+        )
+
+    return clean
+
+
+def _coerce_ph_fields(clean: dict, entry: dict) -> dict | None:
+    if "page" in clean:
+        page_value = _coerce_palacio_page(str(clean["page"]), entry, "page")
+        if page_value is None:
+            return None
+        clean["page"] = page_value
+
+    if "brands" in clean:
+        brands = _coerce_palacio_brands(clean["brands"], entry)
+        if brands is None:
+            return None
+        clean["brands"] = brands
+
+    return clean
+
+
+register_field_coercer("ml", _coerce_ml_fields)
+register_field_coercer("az", _coerce_az_fields)
+register_field_coercer("lv", _coerce_lv_fields)
+register_field_coercer("ph", _coerce_ph_fields)
+
+
+def _coerce_provider_fields(clean: dict, entry: dict) -> dict | None:
+    """Coerce provider-owned YAML fields using the registered provider coercer."""
+    provider = clean["provider"]
+    coercer = _PROVIDER_FIELD_COERCERS.get(provider)
+    if coercer is None:
+        return clean
+    return coercer(clean, entry)
 
 
 def _validate_and_coerce(entry: Any, index: int) -> dict | None:

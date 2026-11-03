@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock
 
 from scraper.runtime.notifications import (
+    NotificationDispatcher,
+    NotificationEvent,
+    NotificationEventType,
     broadcast,
     broadcast_is_updated,
     broadcast_new_element,
     parse_price,
 )
+from scraper.runtime.telegram_notifications import TelegramNotifier, TelegramObserver
 
 
 class ParsePriceTests(unittest.TestCase):
@@ -164,3 +169,85 @@ class PriceDropBroadcastTests(unittest.IsolatedAsyncioTestCase):
         )
 
         send_price_drop.assert_not_awaited()
+
+
+class NotificationDispatcherQueueAndObserverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_running_dispatcher_enqueues_without_blocking_caller(self) -> None:
+        observer_started = asyncio.Event()
+        release_observer = asyncio.Event()
+        received: list[NotificationEvent] = []
+
+        class SlowObserver:
+            async def notify(self, event: NotificationEvent) -> None:
+                observer_started.set()
+                await release_observer.wait()
+                received.append(event)
+
+        dispatcher = NotificationDispatcher(Mock(), observers=[SlowObserver()])
+        dispatcher.start()
+        try:
+            await asyncio.wait_for(
+                dispatcher.broadcast(
+                    "new_element",
+                    {
+                        "job_id": "Macbook",
+                        "title": "MacBook Pro",
+                        "price": 25000.0,
+                        "url": "https://example.test/mac",
+                        "is_initial_scrape": False,
+                    },
+                ),
+                timeout=0.05,
+            )
+            await asyncio.wait_for(observer_started.wait(), timeout=0.5)
+            self.assertEqual(len(received), 0)
+
+            release_observer.set()
+            await dispatcher.stop(drain=True)
+            self.assertEqual(len(received), 1)
+            self.assertEqual(received[0].event_type, NotificationEventType.NEW_ELEMENT)
+        finally:
+            release_observer.set()
+            await dispatcher.stop(drain=False)
+
+    async def test_dispatcher_fans_out_to_multiple_observers_and_isolates_failures(self) -> None:
+        events_a: list[NotificationEvent] = []
+        events_b: list[NotificationEvent] = []
+
+        class FailingObserver:
+            async def notify(self, event: NotificationEvent) -> None:
+                raise RuntimeError("observer transport down")
+
+        class RecordingObserver:
+            def __init__(self, target: list[NotificationEvent]) -> None:
+                self.target = target
+
+            async def notify(self, event: NotificationEvent) -> None:
+                self.target.append(event)
+
+        logger = Mock()
+        obs_a = RecordingObserver(events_a)
+        obs_b = RecordingObserver(events_b)
+        dispatcher = TelegramNotifier(logger, observers=[obs_a, FailingObserver()])
+        dispatcher.add_observer(obs_b)
+        dispatcher.start()
+        try:
+            await dispatcher.broadcast(
+                "is_updated",
+                {
+                    "title": "Switch 2",
+                    "price": 8000.0,
+                    "url": "https://example.test/switch2",
+                    "history": [{"price": 10000.0, "datetime": "2026-01-01"}],
+                },
+            )
+            await dispatcher.stop(drain=True)
+        finally:
+            await dispatcher.stop(drain=False)
+
+        self.assertEqual(len(events_a), 1)
+        self.assertEqual(len(events_b), 1)
+        self.assertEqual(events_a[0].event_type, NotificationEventType.PRICE_DROP)
+        self.assertEqual(events_a[0].element["percent_change"], "20.00")
+        logger.error.assert_called_once()
+        self.assertIsInstance(TelegramObserver(), object)

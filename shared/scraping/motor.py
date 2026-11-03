@@ -1,9 +1,11 @@
+"""Base scraping motor orchestrating fetch, strategy-based page parsing, and persistence."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
-from abc import ABC, abstractmethod
+from abc import ABC
 from traceback import format_exc
 from typing import Any, Callable, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -16,8 +18,8 @@ from shared.articles.repository import ArticleRepository
 from shared.articles.status import Status
 from shared.articles.stream import Stream
 
-from .fetchers import get_fetcher
 from . import motor_config
+from .fetchers import get_fetcher
 from .motor_config import (
     apply_motor_config,
     coerce_bool,
@@ -29,6 +31,7 @@ from .motor_config import (
     get_setting,
     lookup_class_config,
 )
+from .page_strategy import PageScrapeResult, PageScrapeStrategy
 
 logger = logging.getLogger(__name__)
 _CONFIG_PATH = motor_config.CONFIG_PATH
@@ -36,7 +39,11 @@ _load_motor_config = motor_config.load_motor_config
 
 
 class Motor(ABC):
+    """Shared scraping motor that coordinates fetching, page strategies, and article state."""
+
     PROVIDER_KEY: str | None = None
+    PAGE_STRATEGY: PageScrapeStrategy | None = None
+    RETRYABLE_STATUS_CODES: tuple[int, ...] = ()
     PAGE_DELAY_RANGE: Tuple[float, float] | None = None
     FRESH_SESSION_PER_PAGE: bool | None = None
     MAX_RATE_LIMIT_RETRIES: int | None = None
@@ -55,6 +62,10 @@ class Motor(ABC):
         url: str,
         storage_path: str,
         debug: bool = True,
+        *,
+        page_strategy: PageScrapeStrategy | None = None,
+        repository: ArticleRepository | None = None,
+        lifecycle: ArticleLifecycle | None = None,
     ) -> None:
         self.job_id = job_id
         self.url = url
@@ -66,9 +77,12 @@ class Motor(ABC):
         self.blocked_until: float = 0.0
         self.blocked_reason: str | None = None
         self._scrape_incomplete: bool = False
+        self.page_strategy: PageScrapeStrategy | None = (
+            page_strategy if page_strategy is not None else self.PAGE_STRATEGY
+        )
 
         self._apply_config()
-        self._repository = ArticleRepository(
+        self._repository = repository or ArticleRepository(
             self.storage_path,
             self.active,
             self.on_hold,
@@ -76,7 +90,7 @@ class Motor(ABC):
             self.create_article,
             self.debug,
         )
-        self._lifecycle = ArticleLifecycle(
+        self._lifecycle = lifecycle or ArticleLifecycle(
             self.active,
             self.on_hold,
             self.finished,
@@ -123,7 +137,7 @@ class Motor(ABC):
 
     async def _fetch(
         self,
-        session: ClientSession,
+        session: ClientSession | None,
         url: str,
         retries: int = 3,
     ) -> Optional[str]:
@@ -167,7 +181,12 @@ class Motor(ABC):
                     self.job_id,
                 )
 
-            if self.FRESH_SESSION_PER_PAGE:
+            if self.FETCH_STRATEGY == "browser":
+                while current_url:
+                    current_url = await self._scrape_current_page(
+                        None, current_url, results, caller, silent
+                    )
+            elif self.FRESH_SESSION_PER_PAGE:
                 while current_url:
                     async with ClientSession() as session:
                         current_url = await self._scrape_current_page(
@@ -203,13 +222,62 @@ class Motor(ABC):
                     len(results),
                 )
 
-    @abstractmethod
     def scrape_page(self, body: dict) -> Tuple[List[Any], Optional[str]]:
-        """Return (items_list, next_page_url_or_None)."""
+        """Execute the configured :class:`PageScrapeStrategy` and return ``(items, next_url)``."""
+        if self.page_strategy is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} must configure 'page_strategy' or override 'scrape_page'."
+            )
+        content = body.get("content", "")
+        current_url = body.get("url", self.url)
+        result = self.page_strategy.parse_page(
+            content,
+            current_url,
+            job_id=self.job_id,
+        )
+        return self._apply_page_scrape_result(result, current_url=current_url)
+
+    def _apply_page_scrape_result(
+        self,
+        result: PageScrapeResult,
+        *,
+        current_url: str,
+    ) -> Tuple[List[Any], Optional[str]]:
+        """Apply block and completeness state from a :class:`PageScrapeResult`."""
+        if result.blocked_reason:
+            self._scrape_incomplete = True
+            self.mark_blocked(result.blocked_reason, self.BLOCKED_BACKOFF_SECONDS)
+            if self.debug:
+                logger.warning(
+                    "%s returned a blocked/gated page (%s) for '%s' at %s.",
+                    type(self).__name__,
+                    result.blocked_reason,
+                    self.job_id,
+                    current_url,
+                )
+            return result.items, None
+
+        if result.incomplete_reason or result.incomplete:
+            self._scrape_incomplete = True
+            if result.incomplete_reason and not result.incomplete:
+                self.blocked_reason = result.incomplete_reason
+            elif result.incomplete_reason and self.PROVIDER_KEY == "ml":
+                self.blocked_reason = result.incomplete_reason
+            if self.debug and result.incomplete_reason:
+                logger.warning(
+                    "%s returned an incomplete page (%s) for '%s' at %s.",
+                    type(self).__name__,
+                    result.incomplete_reason,
+                    self.job_id,
+                    current_url,
+                )
+            return result.items, None
+
+        return result.items, result.next_url
 
     async def _scrape_current_page(
         self,
-        session: ClientSession,
+        session: ClientSession | None,
         current_url: str,
         results: List[Article],
         caller: Optional[Callable],
@@ -228,7 +296,7 @@ class Motor(ABC):
 
     async def _scrape_page(
         self,
-        session: ClientSession,
+        session: ClientSession | None,
         current_url: str,
         results: List[Article],
         caller: Optional[Callable],
@@ -248,7 +316,14 @@ class Motor(ABC):
 
         try:
             body = {"content": html, "url": current_url}
-            items, next_url = self.scrape_page(body)
+            parsed_page = self.scrape_page(body)
+            if isinstance(parsed_page, PageScrapeResult):
+                items, next_url = self._apply_page_scrape_result(
+                    parsed_page,
+                    current_url=current_url,
+                )
+            else:
+                items, next_url = parsed_page
         except Exception:
             self._scrape_incomplete = True
             self.blocked_reason = "parse_error"

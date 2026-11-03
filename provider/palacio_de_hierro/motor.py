@@ -1,117 +1,62 @@
-import json
-import logging
-import urllib.parse
-from typing import Optional, Tuple, List
+"""Palacio de Hierro provider motor implementation."""
+
+from __future__ import annotations
+
+from typing import List, Optional
 
 from bs4 import BeautifulSoup
+
 from shared.scraping.motor import Motor
+from shared.scraping.page_strategy import PageScrapeStrategy
 
-logger = logging.getLogger(__name__)
+from . import parser as ph_parser
+from .parser import BASE_DOMAIN, DEFAULT_PAGE_SIZE, PalacioConstructorPageStrategy
 
-_DEFAULT_PAGE_SIZE = 52
+_DEFAULT_PAGE_SIZE = DEFAULT_PAGE_SIZE
 
 
 class PalacioDeHierro(Motor):
+    """Scrape Palacio de Hierro search and category listing pages."""
+
     PROVIDER_KEY = "ph"
-    BASE_DOMAIN = "https://www.elpalaciodehierro.com"
+    BASE_DOMAIN = BASE_DOMAIN
+    PAGE_STRATEGY = PalacioConstructorPageStrategy(base_domain=BASE_DOMAIN)
 
-    def __init__(self, job_id: str, url: str, *, storage_path: str):
-        super().__init__(job_id, url, storage_path=storage_path)
-
-    def scrape_page(self, body: dict) -> Tuple[List[dict], Optional[str]]:
-        soup = BeautifulSoup(body.get("content", ""), "lxml")
-        items = self._parse_grid(soup)
-
-        if not items:
-            self._scrape_incomplete = True
-            logger.warning("[PH] No product tiles found for '%s'.", self.job_id)
-            return [], None
-
-        next_url = self._next_url(
-            current_url=body.get("url", self.url),
-            items_on_page=len(items),
-            total=self._total(soup),
-            page_size=self._page_size(soup),
+    def __init__(
+        self,
+        job_id: str,
+        url: str,
+        *,
+        storage_path: str,
+        page_strategy: PageScrapeStrategy | None = None,
+    ) -> None:
+        strategy = page_strategy or PalacioConstructorPageStrategy(base_domain=self.BASE_DOMAIN)
+        super().__init__(
+            job_id,
+            url,
+            storage_path=storage_path,
+            page_strategy=strategy,
         )
-        return items, next_url
 
     def _parse_grid(self, soup: BeautifulSoup) -> List[dict]:
-        items: List[dict] = []
-        for tile in soup.select("div[data-cnstrc-item-section='Products']"):
-            identifier = tile.get("data-pid") or tile.get("data-cnstrc-item-id", "")
-            raw_title = tile.get("data-cnstrc-item-name", "")
-            title = raw_title.strip() if isinstance(raw_title, str) else ""
-            raw_price = tile.get("data-cnstrc-item-price", "0")
+        return ph_parser.parse_grid(soup, base_domain=self.BASE_DOMAIN)
 
-            if not identifier or not title:
-                continue
-
-            try:
-                price = float(raw_price) if isinstance(raw_price, str) else 0.0
-            except ValueError:
-                price = 0.0
-
-            link = tile.select_one("a[href]")
-            href = link.get("href") if link else None
-            url = href if isinstance(href, str) else ""
-            if url.startswith("/"):
-                url = f"{self.BASE_DOMAIN}{url}"
-
-            items.append(
-                {
-                    "identifier": str(identifier),
-                    "title": title,
-                    "price": price,
-                    "url": url,
-                }
-            )
-        return items
-
-    def _next_url(self, current_url, items_on_page, total, page_size) -> Optional[str]:
-        if total <= 0 or items_on_page < page_size:
-            return None
-
-        parsed = urllib.parse.urlparse(current_url)
-        qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-        current_start = int(qs.get("start", ["0"])[0] or 0)
-        next_start = current_start + page_size
-
-        if next_start >= total:
-            return None
-
-        qs["start"] = [str(next_start)]
-        new_query = urllib.parse.urlencode(qs, doseq=True)
-        return urllib.parse.urlunparse(
-            (
-                parsed.scheme,
-                parsed.netloc,
-                parsed.path,
-                parsed.params,
-                new_query,
-                parsed.fragment,
-            )
+    def _next_url(
+        self,
+        current_url: str,
+        items_on_page: int,
+        total: int,
+        page_size: int,
+    ) -> Optional[str]:
+        return ph_parser.next_url(
+            current_url=current_url,
+            items_on_page=items_on_page,
+            total=total,
+            page_size=page_size,
         )
 
     def _page_size(self, soup: BeautifulSoup) -> int:
-        section = soup.select_one('section[data-component="search/ConstructorSearch"]')
-        if section and section.has_attr("data-component-options"):
-            options = section.get("data-component-options")
-            if not isinstance(options, str):
-                return _DEFAULT_PAGE_SIZE
-            try:
-                return int(json.loads(options).get("pageSize", _DEFAULT_PAGE_SIZE))
-            except json.JSONDecodeError, ValueError:
-                pass
-        return _DEFAULT_PAGE_SIZE
+        return ph_parser.page_size(soup)
 
     def _total(self, soup: BeautifulSoup) -> int:
-        grid = soup.select_one("[data-cnstrc-num-results]")
-        if grid:
-            raw_total = grid.get("data-cnstrc-num-results")
-            if not isinstance(raw_total, str):
-                return 0
-            try:
-                return int(raw_total)
-            except ValueError:
-                pass
-        return 0
+        return ph_parser.total_results(soup)

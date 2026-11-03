@@ -1,67 +1,33 @@
 """Amazon Mexico scraper motor."""
 
-import re
-import urllib.parse
+from __future__ import annotations
 
-from bs4 import BeautifulSoup
 from shared.scraping.motor import Motor
+from shared.scraping.page_strategy import PageScrapeStrategy
+
+from .parser import DEFAULT_DOMAIN, AmazonSearchPageStrategy
 
 
 class Amazon(Motor):
     """Scrape Amazon Mexico search result pages."""
 
     PROVIDER_KEY = "az"
-    DOMAIN = "https://www.amazon.com.mx"
+    DOMAIN = DEFAULT_DOMAIN
+    PAGE_STRATEGY = AmazonSearchPageStrategy(domain=DEFAULT_DOMAIN)
 
-    def __init__(self, job_id: str, url: str, *, storage_path: str):
+    def __init__(
+        self,
+        job_id: str,
+        url: str,
+        *,
+        storage_path: str,
+        page_strategy: PageScrapeStrategy | None = None,
+    ) -> None:
         """Create an Amazon motor for a generated or explicit result URL."""
-        super().__init__(job_id, url, storage_path=storage_path)
-
-    def scrape_page(self, body: dict):
-        items = []
-        next_url = None
-
-        content = body.get("content", "")
-        soup = BeautifulSoup(content, "lxml")
-
-        items_div = soup.find_all("div", {"data-component-type": "s-search-result"})
-
-        for item in items_div:
-            asin = item.get("data-asin")
-            if not asin:
-                continue
-
-            try:
-                title_tag = item.select_one("h2 span") or item.select_one("h2")
-                if not title_tag:
-                    continue
-
-                title = title_tag.get_text(strip=True)
-
-                price_val = 0.0
-                price_tag = item.select_one("span.a-price span.a-offscreen")
-                if price_tag:
-                    raw_price = price_tag.get_text()
-                    price_str = re.sub(r"[^\d.]", "", raw_price.replace(",", ""))
-                    price_val = float(price_str) if price_str else 0.0
-                else:
-                    continue
-
-                items.append(
-                    {
-                        "identifier": asin,
-                        "url": f"{self.DOMAIN}/dp/{asin}/",
-                        "title": title,
-                        "price": price_val,
-                    }
-                )
-
-            except ValueError, AttributeError:
-                continue
-
-        next_tag = soup.select_one("a.s-pagination-next, span.s-pagination-next a")
-        href = next_tag.get("href") if next_tag else None
-        if isinstance(href, str) and href:
-            next_url = urllib.parse.urljoin(self.DOMAIN, href)
-
-        return items, next_url
+        strategy = page_strategy or AmazonSearchPageStrategy(domain=self.DOMAIN)
+        super().__init__(
+            job_id,
+            url,
+            storage_path=storage_path,
+            page_strategy=strategy,
+        )

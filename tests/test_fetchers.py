@@ -157,6 +157,23 @@ class AioHttpFetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.calls, 2)
         sleep.assert_awaited_once()
 
+    async def test_declarative_retryable_status_codes_on_motor_are_retried(self) -> None:
+        motor = FetcherDummyMotor()
+        motor.RETRYABLE_STATUS_CODES = (404,)  # type: ignore[attr-defined]
+        session = FakeSession([FakeResponse(404), FakeResponse(200, "<html>recovered</html>")])
+
+        with patch("shared.scraping.fetchers.asyncio.sleep", new=AsyncMock()) as sleep:
+            html = await AioHttpFetcher().fetch(
+                motor,
+                cast(Any, session),
+                "https://example.test/custom-provider",
+                retries=2,
+            )
+
+        self.assertEqual(html, "<html>recovered</html>")
+        self.assertEqual(session.calls, 2)
+        sleep.assert_awaited_once()
+
     async def test_non_liverpool_404_still_breaks_without_retrying(self) -> None:
         motor = FetcherDummyMotor()
         session = FakeSession([FakeResponse(404), FakeResponse(200, "<html>ok</html>")])

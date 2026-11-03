@@ -146,3 +146,32 @@ class ArticleLifecycleStateTests(unittest.TestCase):
 
         self.assertEqual(finished.get_list()[0].hold_misses, 0)
         self.assertEqual(finished.get_list()[0].status_history[0].status, Status.finished)
+
+
+class StreamIndexedOperationsTests(unittest.TestCase):
+    def test_stream_index_stays_consistent_across_add_update_delete_and_subtract(self) -> None:
+        stream = Stream(Status.active)
+        a1 = Article("id-1", "First", 10.0)
+        a2 = Article("id-2", "Second", 20.0)
+        stream.add(a1)
+        stream.add(a2, at_beginning=True)
+
+        self.assertIn(a1, stream)
+        self.assertIn(a2, stream)
+        self.assertIsNone(stream.add(Article("id-1", "Duplicate", 99.0)))
+
+        updated = stream.update(Article("id-1", "First Updated", 15.0))
+        assert updated is not None
+        self.assertEqual(updated.price, 15.0)
+
+        diff = stream - [Article("id-2", "Second", 20.0)]
+        self.assertEqual([item.identifier for item in diff], ["id-1"])
+
+        removed = stream.delete(Article("id-1", "First", 15.0))
+        self.assertIsNotNone(removed)
+        self.assertNotIn(a1, stream)
+        self.assertIsNone(stream.delete(Article("missing", "Missing", 1.0)))
+
+        stream.clear()
+        self.assertEqual(len(stream), 0)
+        self.assertNotIn(a2, stream)

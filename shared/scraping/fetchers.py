@@ -1,8 +1,11 @@
+"""HTTP and headless browser fetching strategies."""
+
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
@@ -11,17 +14,87 @@ from utils.headers import get_random_header
 logger = logging.getLogger(__name__)
 
 
+@runtime_checkable
+class FetchTarget(Protocol):
+    """Segregated motor interface required by page fetchers (ISP)."""
+
+    FETCH_TIMEOUT_SECONDS: int | None
+    MAX_RATE_LIMIT_RETRIES: int | None
+    BLOCKED_BACKOFF_SECONDS: int | None
+    BROWSER_WAIT_SELECTOR: str | None
+    BROWSER_BLOCK_SELECTORS: tuple[str, ...] | None
+    debug: bool
+
+    def _retry_after_delay(self, value: Optional[str]) -> float:
+        """Compute retry delay seconds from an HTTP ``Retry-After`` header."""
+        ...
+
+    def mark_blocked(self, reason: str, cooldown: float | int | None = None) -> None:
+        """Record a temporary block reason and optional backoff cooldown."""
+        ...
+
+
+@runtime_checkable
+class PageFetcher(Protocol):
+    """Strategy interface for fetching raw HTML for a target URL."""
+
+    async def fetch(
+        self,
+        motor: Any,
+        session: ClientSession | None,
+        url: str,
+        retries: int = 3,
+    ) -> Optional[str]:
+        """Fetch ``url`` and return raw HTML content, or ``None`` on failure."""
+        ...
+
+
 def _is_liverpool_url(url: str) -> bool:
     return "liverpool.com.mx" in str(url).lower()
 
 
+def _is_retryable_status(motor: Any, status: int, url: str) -> bool:
+    """Return ``True`` when a non-200 HTTP status should be retried for ``motor``."""
+    retryable_codes = getattr(motor, "RETRYABLE_STATUS_CODES", ()) or ()
+    if status in retryable_codes:
+        return True
+    if status == 404 and _is_liverpool_url(url):
+        return True
+    return False
+
+
 class AioHttpFetcher:
+    """Asynchronous HTTP fetcher backed by ``aiohttp.ClientSession``."""
+
     async def fetch(
         self,
         motor: Any,
-        session: ClientSession,
+        session: ClientSession | None,
         url: str,
         retries: int = 3,
+    ) -> Optional[str]:
+        if session is None:
+            async with ClientSession() as owned_session:
+                return await self._fetch_with_session(
+                    motor=motor,
+                    session=owned_session,
+                    url=url,
+                    retries=retries,
+                )
+        return await self._fetch_with_session(
+            motor=motor,
+            session=session,
+            url=url,
+            retries=retries,
+        )
+
+    async def _fetch_with_session(
+        self,
+        *,
+        motor: Any,
+        session: ClientSession,
+        url: str,
+        retries: int,
     ) -> Optional[str]:
         attempt = 0
         rate_limit_hits = 0
@@ -65,9 +138,7 @@ class AioHttpFetcher:
                         continue
                     if motor.debug:
                         logger.warning("HTTP %s for %s", resp.status, url)
-                    if resp.status == 404 and _is_liverpool_url(url):
-                        # Liverpool occasionally serves transient 404s for valid tokens.
-                        # Retry with a fresh browser-like header profile before failing.
+                    if _is_retryable_status(motor, resp.status, url):
                         pass
                     elif resp.status in {403, 404}:
                         break
@@ -88,6 +159,8 @@ class AioHttpFetcher:
 
 
 class BrowserFetcher:
+    """Headless Chromium fetcher backed by Playwright for JS-gated providers."""
+
     _playwright: Any = None
     _browser: Any = None
     _context: Any = None
@@ -125,10 +198,25 @@ class BrowserFetcher:
                 logger.warning("Browser fetch failed for %s: %s", url, exc)
             return None
         finally:
-            try:
+            with suppress(Exception):
                 await page.close()
-            except Exception:
-                pass
+
+    async def close(self) -> None:
+        """Close the shared Playwright browser context and Chromium process."""
+        async with self._lock:
+            context, self._context = self._context, None
+            browser, self._browser = self._browser, None
+            playwright, self._playwright = self._playwright, None
+
+            if context is not None:
+                with suppress(Exception):
+                    await context.close()
+            if browser is not None:
+                with suppress(Exception):
+                    await browser.close()
+            if playwright is not None:
+                with suppress(Exception):
+                    await playwright.stop()
 
     async def _get_context(self) -> Any:
         async with self._lock:
@@ -226,11 +314,30 @@ class BrowserFetcher:
             return False
 
 
-_FETCHERS = {
+_FETCHERS: dict[str, PageFetcher] = {
     "aiohttp": AioHttpFetcher(),
     "browser": BrowserFetcher(),
 }
 
 
-def get_fetcher(strategy: str) -> AioHttpFetcher | BrowserFetcher:
+def register_fetcher(strategy: str, fetcher: PageFetcher) -> None:
+    """Register a custom :class:`PageFetcher` under ``strategy``."""
+    key = strategy.strip().lower()
+    if not key:
+        raise ValueError("Fetcher strategy name cannot be blank.")
+    _FETCHERS[key] = fetcher
+
+
+def get_fetcher(strategy: str) -> PageFetcher:
+    """Return the registered :class:`PageFetcher` for ``strategy``."""
     return _FETCHERS[strategy]
+
+
+async def close_fetchers() -> None:
+    """Close any registered fetchers that hold persistent resources."""
+    for fetcher in _FETCHERS.values():
+        close_fn = getattr(fetcher, "close", None)
+        if callable(close_fn):
+            result = close_fn()
+            if asyncio.iscoroutine(result):
+                await result
