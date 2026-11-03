@@ -9,16 +9,23 @@ import requests
 from .options import (
     Brand,
     Category,
+    LIVERPOOL_SELLER_FILTER_ID,
     LIVERPOOL_SELLER_REFINEMENT_NAME,
     LIVERPOOL_SELLER_REFINEMENT_VALUE,
     Page,
+    PageKind,
     resolve_page,
 )
 
 BASE_URL = "https://www.liverpool.com.mx/tienda"
-FILTER_URL = "https://www.liverpool.com.mx/getPlpFilter"
+FILTER_URL = "https://www.liverpool.com.mx/api/plp/search"
 REQUEST_TIMEOUT_SECONDS = 15
 TALLA_REFINEMENT_NAME = "attributes.rzlv_tallaRopa"
+TALLA_ENRICH_REFINEMENT_NAME = "attributes.enrichAI_Talla"
+TALLA_FILTER_IDS = {
+    "26.5 cm": "YXR0cmlidXRlcy5lbnJpY2hBSV9UYWxsYTpWOjI2LjUgY20=",
+    "27 cm": "YXR0cmlidXRlcy5lbnJpY2hBSV9UYWxsYTpWOjI3IGNt",
+}
 
 _SUPPORTED_ZAPATOS_TALLAS = {
     "26.5 cm": "26.5 cm",
@@ -132,6 +139,11 @@ def _response_main_content(payload: dict) -> dict:
         main_content = data.get("mainContent")
         if isinstance(main_content, dict):
             return main_content
+        if any(
+            key in data
+            for key in ("encryptedFilters", "filtersGroups", "filter", "originalRequest")
+        ):
+            return data
 
     raise LiverpoolResolverError(
         "Liverpool seller-filter resolver returned no mainContent. Provide an explicit url."
@@ -142,25 +154,58 @@ def _selected_refinement_values(main_content: dict, name: str) -> set[str]:
     """Collect selected refinement values for a Liverpool navigation name."""
     values: set[str] = set()
     selected_navigation = main_content.get("selectedNavigation") or ()
-    if not isinstance(selected_navigation, list):
-        return values
+    if isinstance(selected_navigation, list):
+        for navigation in selected_navigation:
+            if not isinstance(navigation, dict) or navigation.get("name") != name:
+                continue
+            refinements = navigation.get("refinements") or ()
+            if not isinstance(refinements, list):
+                continue
+            for refinement in refinements:
+                if isinstance(refinement, dict) and refinement.get("value") is not None:
+                    values.add(str(refinement["value"]))
 
-    for navigation in selected_navigation:
-        if not isinstance(navigation, dict) or navigation.get("name") != name:
-            continue
-        refinements = navigation.get("refinements") or ()
-        if not isinstance(refinements, list):
-            continue
-        for refinement in refinements:
-            if isinstance(refinement, dict) and refinement.get("value") is not None:
-                values.add(str(refinement["value"]))
+    filters_groups = main_content.get("filtersGroups") or ()
+    if isinstance(filters_groups, list):
+        for group in filters_groups:
+            if not isinstance(group, dict):
+                continue
+            dimension = str(group.get("dimensionName") or "")
+            if dimension == name:
+                filters = group.get("filter") or ()
+                if isinstance(filters, list):
+                    for item in filters:
+                        if isinstance(item, dict) and item.get("selected"):
+                            label = item.get("label") or item.get("value")
+                            if label is not None:
+                                values.add(str(label))
+            elif name == "ancestors" and dimension == "Category":
+                ancestors = group.get("ancestors") or ()
+                if isinstance(ancestors, list):
+                    for ancestor in ancestors:
+                        if isinstance(ancestor, dict) and ancestor.get("selected"):
+                            cat_id = ancestor.get("categoryId")
+                            if cat_id is not None:
+                                values.add(str(cat_id))
+                                values.add(str(cat_id).upper())
+
+    raw_filter = main_content.get("filter")
+    if isinstance(raw_filter, str) and raw_filter:
+        if name == LIVERPOOL_SELLER_REFINEMENT_NAME:
+            for match in re.findall(r'attributes\.sellernames:\s*ANY\("([^"]+)"\)', raw_filter):
+                values.add(match)
+        elif name == "ancestors":
+            for match in re.findall(r'attributes\.ancestors:\s*ANY\("([^"]+)"\)', raw_filter):
+                values.add(match)
+                values.add(match.upper())
+
     return values
 
 
 def _validate_seller_navigation(main_content: dict) -> None:
     """Require Liverpool's selected seller refinement in a resolver response."""
     seller_values = _selected_refinement_values(main_content, LIVERPOOL_SELLER_REFINEMENT_NAME)
-    if LIVERPOOL_SELLER_REFINEMENT_VALUE not in seller_values:
+    if LIVERPOOL_SELLER_REFINEMENT_VALUE not in {v.casefold() for v in seller_values}:
         raise LiverpoolResolverError(
             "Liverpool seller-filter resolver did not select Liverpool as seller. "
             "Provide an explicit url."
@@ -169,25 +214,29 @@ def _validate_seller_navigation(main_content: dict) -> None:
 
 def _validate_page_navigation(main_content: dict, page: Page) -> None:
     """Require Liverpool's selected page ancestor in a resolver response."""
-    ancestor_values = _selected_refinement_values(main_content, "ancestors")
-    category_id = page.value.category_id
+    ancestor_values = {v.upper() for v in _selected_refinement_values(main_content, "ancestors")}
+    category_id = page.value.category_id.upper()
     if category_id not in ancestor_values:
         raise LiverpoolResolverError(
-            f"Liverpool seller-filter resolver did not select page ancestor {category_id!r}. "
+            f"Liverpool seller-filter resolver did not select page ancestor {page.value.category_id!r}. "
             "Provide an explicit url."
         )
 
 
 def _extract_encrypted_url(main_content: dict) -> str:
     """Return Liverpool's encrypted ``N-`` URL segment from a resolver response."""
-    original_request = main_content.get("originalRequest")
-    if not isinstance(original_request, dict):
-        raise LiverpoolResolverError(
-            "Liverpool seller-filter resolver returned no originalRequest. "
-            "Provide an explicit url."
-        )
+    encrypted_filters = main_content.get("encryptedFilters")
+    if encrypted_filters is not None:
+        encrypted_url = str(encrypted_filters).strip()
+    else:
+        original_request = main_content.get("originalRequest")
+        if not isinstance(original_request, dict):
+            raise LiverpoolResolverError(
+                "Liverpool seller-filter resolver returned no originalRequest. "
+                "Provide an explicit url."
+            )
+        encrypted_url = str(original_request.get("encryptedFullUrl") or "").strip()
 
-    encrypted_url = str(original_request.get("encryptedFullUrl") or "").strip()
     if not encrypted_url:
         raise LiverpoolResolverError(
             "Liverpool seller-filter resolver returned no encrypted URL. "
@@ -208,7 +257,7 @@ def _resolver_params(
     query: str | None = None,
     page: Page | None = None,
 ) -> dict[str, str]:
-    """Build the Liverpool filter endpoint params for seller-filter resolution."""
+    """Build legacy Liverpool filter endpoint params for seller-filter resolution."""
     params = {
         "Path": "PLP",
         "label": LIVERPOOL_SELLER_REFINEMENT_NAME,
@@ -227,6 +276,56 @@ def _resolver_params(
         params["categoryName"] = metadata.display_name
 
     return params
+
+
+def _resolver_payload(
+    *,
+    query: str | None = None,
+    page: Page | None = None,
+) -> dict[str, str | list[str]]:
+    """Build the JSON payload for Liverpool's ``/api/plp/search`` endpoint."""
+    payload: dict[str, str | list[str]] = {
+        "channel": "WEB",
+        "brand": "LP",
+        "dataCenter": "SiteA",
+        "gbi_visitorId": "",
+        "appliedFilters": [LIVERPOOL_SELLER_FILTER_ID],
+    }
+
+    query_value = _query_value(query)
+    if query_value:
+        payload["query"] = query_value
+
+    if page is not None:
+        metadata = page.value
+        payload["categoryId"] = metadata.category_id.lower()
+        payload["pageCategories"] = ">".join(metadata.breadcrumb)
+
+    return payload
+
+
+def _resolver_headers(
+    *,
+    query: str | None = None,
+    page: Page | None = None,
+) -> dict[str, str]:
+    """Build browser-like headers for Liverpool's ``/api/plp/search`` endpoint."""
+    action = "browse-show" if page is not None else "search-show"
+    return {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Origin": "https://www.liverpool.com.mx",
+        "Referer": _resolver_referer(query=query, page=page),
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+        ),
+        "x-brand-id": "LP",
+        "X-Client-Page": "plp",
+        "X-Client-Component": "list",
+        "X-Client-Channel": "web",
+        "X-Client-Action": action,
+    }
 
 
 def _resolver_referer(*, query: str | None = None, page: Page | None = None) -> str:
@@ -251,17 +350,10 @@ def _resolve_seller_filtered_segment(
     query_value = _query_value(query)
 
     try:
-        response = requests.get(
+        response = requests.post(
             FILTER_URL,
-            params=_resolver_params(query=query_value, page=page),
-            headers={
-                "Accept": "application/json",
-                "Referer": _resolver_referer(query=query_value, page=page),
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome Safari"
-                ),
-            },
+            json=_resolver_payload(query=query_value, page=page),
+            headers=_resolver_headers(query=query_value, page=page),
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -383,7 +475,7 @@ def preview_liverpool_url(
     if show_plp:
         if page_value is None:
             raise ValueError("Provide a Liverpool page when show_plp=True.")
-        return build_page_url(page_value)
+        return build_page_url(page_value, show_plp=True)
 
     if not (query or page_value):
         raise ValueError("Provide query, page, category, or explicit url.")
@@ -419,22 +511,42 @@ def build_zapatos_talla_url(
         ) from exc
 
 
-def build_page_url(page: str | Page, *, query: str | None = None) -> str:
+def build_page_url(
+    page: str | Page,
+    *,
+    query: str | None = None,
+    show_plp: bool = False,
+) -> str:
     """Build a verified Liverpool-seller URL for a documented page.
 
-    Page-scoped queries intentionally omit the human slug. Liverpool preserves
-    both seller and ancestor refinements for ``/tienda/N-{token}?s=query`` but
-    currently drops them when the same query is appended to the slugged URL.
+    Args:
+        page: Known Liverpool page name or ``Page`` enum member.
+        query: Optional page-scoped search query.
+        show_plp: Whether to force ``?showPLP`` on the generated URL.
+
+    Returns:
+        A verified seller-filtered Liverpool listing URL.
+
+    Notes:
+        Page-scoped queries omit the category segment and use
+        ``/tienda/N-{token}?s=query``. Category routes on Liverpool's Next.js
+        App Router require the lowercase category ID segment
+        (``/tienda/{category_id}/N-{token}``) and ``?showPLP`` on landing
+        pages so SSR renders ``initialResults`` instead of promotional blocks.
     """
     page_value = resolve_page(page)
     metadata = page_value.value
     segment = _resolve_seller_filtered_segment(page_name=page_value.name)
+    base_segment = segment.split("?", 1)[0]
     query_value = _query_value(query)
     if query_value:
-        return f"{BASE_URL}/{segment}?s={urllib.parse.quote_plus(query_value)}"
+        return f"{BASE_URL}/{base_segment}?s={urllib.parse.quote_plus(query_value)}"
 
-    encoded_slug = urllib.parse.quote(metadata.slug, safe="")
-    return f"{BASE_URL}/{encoded_slug}/{segment}"
+    category_segment = metadata.category_id.lower()
+    url = f"{BASE_URL}/{category_segment}/{base_segment}"
+    if show_plp or metadata.kind is PageKind.landing:
+        return f"{url}?showPLP"
+    return url
 
 
 def build_canonical_page_url(page: str | Page, *, show_plp: bool = False) -> str:

@@ -233,3 +233,39 @@ class BrowserFetcherEdgeTests(unittest.IsolatedAsyncioTestCase):
         page = FakePage(selector_error=True)
 
         self.assertFalse(await BrowserFetcher._selector_exists(page, "section.results"))
+
+    async def test_get_context_uses_cors_safe_headers_and_chromium_user_agent(self) -> None:
+        fetcher = BrowserFetcher()
+        fetcher._context = None
+        fake_context = Mock()
+        fake_context.add_init_script = AsyncMock()
+        fake_browser = Mock()
+        fake_browser.new_context = AsyncMock(return_value=fake_context)
+        fake_pw = Mock()
+        fake_pw.chromium.launch = AsyncMock(return_value=fake_browser)
+        fake_pw_cm = Mock()
+        fake_pw_cm.start = AsyncMock(return_value=fake_pw)
+
+        with (
+            patch(
+                "shared.scraping.fetchers.get_random_header",
+                return_value={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/18.6 Safari/605.1.15",
+                    "Accept-Language": "es-MX,es;q=0.9",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Cache-Control": "no-cache",
+                },
+            ),
+            patch("playwright.async_api.async_playwright", return_value=fake_pw_cm),
+        ):
+            context = await fetcher._get_context()
+
+        self.assertIs(context, fake_context)
+        call_kwargs = fake_browser.new_context.call_args.kwargs
+        self.assertIn("Chrome/", call_kwargs["user_agent"])
+        self.assertEqual(
+            call_kwargs["extra_http_headers"],
+            {"Accept-Language": "es-MX,es;q=0.9"},
+        )
+        fake_context.add_init_script.assert_awaited_once()
+        fetcher._context = None

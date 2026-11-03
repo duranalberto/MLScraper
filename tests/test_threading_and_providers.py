@@ -512,6 +512,7 @@ class ConfigPathResolutionTests(unittest.TestCase):
         self.assertEqual(jobs, expected_jobs)
 
     def test_telegram_config_path_is_repo_root_based(self) -> None:
+        expected_config = telegram._load_config()
         original_cwd = Path.cwd()
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
@@ -521,7 +522,7 @@ class ConfigPathResolutionTests(unittest.TestCase):
                 os.chdir(original_cwd)
 
         self.assertTrue(telegram._CONFIG_PATH.is_absolute())
-        self.assertEqual((token, chat_id), ("", ""))
+        self.assertEqual((token, chat_id), expected_config)
 
 
 class FetchStrategyConfigTests(unittest.TestCase):
@@ -848,6 +849,10 @@ class HeaderGenerationTests(unittest.TestCase):
         self.assertIsInstance(headers, dict)
         self.assertIn("User-Agent", headers)
         self.assertIn("Accept", headers)
+
+    def test_all_header_profiles_use_direct_navigation_sec_fetch_site(self) -> None:
+        for profile in HEADER_PROFILES:
+            self.assertEqual(profile.sec_fetch_site, "none")
 
 
 if __name__ == "__main__":

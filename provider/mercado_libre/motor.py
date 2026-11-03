@@ -40,6 +40,13 @@ class MercadoLibre(Motor):
         if result.incomplete_reason:
             self._scrape_incomplete = True
             self.blocked_reason = result.incomplete_reason
+            if self.debug:
+                logger.warning(
+                    "Mercado Libre returned an incomplete page (%s) for '%s' at %s.",
+                    result.incomplete_reason,
+                    self.job_id,
+                    body.get("url", self.url),
+                )
             return result.items, None
 
         return result.items, result.next_url

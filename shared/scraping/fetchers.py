@@ -138,7 +138,16 @@ class BrowserFetcher:
             from playwright.async_api import async_playwright
 
             headers = get_random_header()
-            user_agent = headers.pop("User-Agent")
+            user_agent = headers.get("User-Agent", "")
+            if "Chrome/" not in user_agent:
+                user_agent = (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+                )
+            accept_language = headers.get(
+                "Accept-Language",
+                "es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7",
+            )
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(
                 headless=True,
@@ -149,8 +158,12 @@ class BrowserFetcher:
                 locale="es-MX",
                 timezone_id="America/Mexico_City",
                 viewport={"width": 1366, "height": 768},
-                extra_http_headers=headers,
+                extra_http_headers={"Accept-Language": accept_language},
             )
+            if hasattr(self._context, "add_init_script"):
+                await self._context.add_init_script(
+                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+                )
             return self._context
 
     async def _wait_for_page(self, motor: Any, page: Any) -> Optional[str]:
@@ -161,6 +174,12 @@ class BrowserFetcher:
         while asyncio.get_running_loop().time() < deadline:
             if await self._is_blocked(page, motor.BROWSER_BLOCK_SELECTORS):
                 motor.mark_blocked("browser_blocked", motor.BLOCKED_BACKOFF_SECONDS)
+                if motor.debug:
+                    logger.warning(
+                        "Browser fetch blocked for '%s' at %s.",
+                        getattr(motor, "job_id", "unknown"),
+                        getattr(page, "url", "unknown"),
+                    )
                 return None
 
             if not wait_selector or await self._selector_exists(page, wait_selector):
@@ -168,11 +187,24 @@ class BrowserFetcher:
                 if content and content.strip():
                     return content
                 motor.mark_blocked("browser_empty_content", motor.BLOCKED_BACKOFF_SECONDS)
+                if motor.debug:
+                    logger.warning(
+                        "Browser fetch returned empty content for '%s' at %s.",
+                        getattr(motor, "job_id", "unknown"),
+                        getattr(page, "url", "unknown"),
+                    )
                 return None
 
             await asyncio.sleep(self._poll_interval_seconds)
 
         motor.mark_blocked("browser_timeout", motor.BLOCKED_BACKOFF_SECONDS)
+        if motor.debug:
+            logger.warning(
+                "Browser fetch timed out waiting for '%s' on '%s' at %s.",
+                wait_selector,
+                getattr(motor, "job_id", "unknown"),
+                getattr(page, "url", "unknown"),
+            )
         return None
 
     async def _is_blocked(self, page: Any, block_selectors: tuple[str, ...]) -> bool:

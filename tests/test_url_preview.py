@@ -24,25 +24,23 @@ jobs:
     category: playstation
 """)
         with patch(
-            "provider.liverpool.urls.requests.get",
+            "provider.liverpool.urls.requests.post",
             return_value=_MockResponse(
                 {
-                    "mainContent": {
-                        "originalRequest": {"encryptedFullUrl": "N-playstationToken"},
-                        "selectedNavigation": [
-                            {"name": "ancestors", "refinements": [{"value": "CAT1161024"}]},
-                            {
-                                "name": "variants.sellernames",
-                                "refinements": [{"value": "liverpool"}],
-                            },
-                        ],
+                    "data": {
+                        "encryptedFilters": "N-playstationToken",
+                        "filter": (
+                            'attributes.sellernames: ANY("liverpool") AND '
+                            'attributes.ancestors: ANY("CAT1161024")'
+                        ),
+                        "filtersGroups": [],
                     }
                 }
             ),
         ):
             self.assertEqual(
                 preview_job_url("PlayStation", provider="lv", config_path=path),
-                "https://www.liverpool.com.mx/tienda/playstation/N-playstationToken",
+                "https://www.liverpool.com.mx/tienda/cat1161024/N-playstationToken?showPLP",
             )
 
     def test_preview_job_requires_existing_match(self) -> None:

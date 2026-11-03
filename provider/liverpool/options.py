@@ -7,6 +7,7 @@ from enum import Enum
 
 LIVERPOOL_SELLER_REFINEMENT_NAME = "variants.sellernames"
 LIVERPOOL_SELLER_REFINEMENT_VALUE = "liverpool"
+LIVERPOOL_SELLER_FILTER_ID = "fjI1OlY6bGl2ZXJwb29s"
 
 
 class PageKind(Enum):

@@ -420,7 +420,7 @@ class FactoryTests(unittest.TestCase):
         page: LiverpoolPage | None = None,
     ):
         return patch(
-            "provider.liverpool.urls.requests.get",
+            "provider.liverpool.urls.requests.post",
             return_value=self._MockResponse(encrypted_url, page),
         )
 
@@ -645,8 +645,8 @@ class FactoryTests(unittest.TestCase):
 
         self.assertEqual(
             motor.url,
-            "https://www.liverpool.com.mx/tienda/computaci%C3%B3n/"
-            "N-S1sLjNksKoG%2BC2c1SDPsHN%2BJ%2BVnTTvZIur1XfBh58ds%3D",
+            "https://www.liverpool.com.mx/tienda/cat3410055/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHN%2BJ%2BVnTTvZIur1XfBh58ds%3D?showPLP",
         )
 
     def test_liverpool_factory_generates_seeded_zapatos_talla_url(self) -> None:

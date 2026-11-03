@@ -22,3 +22,5 @@ htmlcov/
 
 utils/secret.py
 config/telegram.yaml
+
+.DS_STORE

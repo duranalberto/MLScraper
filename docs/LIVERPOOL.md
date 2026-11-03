@@ -30,23 +30,29 @@ refinements, while `/tienda/N-{page_token}?s=query` preserves both.
 
 ## Seller Resolution
 
-Generated Liverpool URLs call Liverpool's `/getPlpFilter` endpoint with the
-documented page metadata and the seller refinement:
+Generated Liverpool URLs call Liverpool's `POST /api/plp/search` endpoint with
+the documented page metadata and the Liverpool seller refinement (`fjI1OlY6bGl2ZXJwb29s`):
 
-```text
-categoryId: the page category id
-Path: PLP
-label: variants.sellernames
-Fs: liverpool
-displayName: Vendido por
-orValue: true
+```json
+{
+  "categoryId": "<lowercase page category id>",
+  "pageCategories": "<Home>...><Page>",
+  "channel": "WEB",
+  "brand": "LP",
+  "dataCenter": "SiteA",
+  "gbi_visitorId": "",
+  "appliedFilters": ["fjI1OlY6bGl2ZXJwb29s"]
+}
 ```
 
-The resolver uses `mainContent.originalRequest.encryptedFullUrl` and validates
-that `selectedNavigation` contains `variants.sellernames = liverpool`. Page
-URLs also require `ancestors = the page category id`. If Liverpool does not
-return a valid seller-filtered route, generated jobs fail fast and the job must
-provide an explicit `url`.
+The resolver uses `data.encryptedFilters` (or legacy
+`mainContent.originalRequest.encryptedFullUrl`) and validates that the response
+selects `variants.sellernames = liverpool` (via `filtersGroups` or `filter`).
+Page URLs also require `ancestors` matching the page category id and build
+`/tienda/{category_id_lower}/{N-token}` (with `?showPLP` appended on `landing`
+pages so SSR renders `initialResults`). If Liverpool does not return a valid
+seller-filtered route, generated jobs fail fast and the job must provide an
+explicit `url`.
 
 The full `N-` tokens are still opaque. Tests should validate generated URLs
 against known-good seller-filtered URLs, but page metadata should not store the
@@ -115,17 +121,16 @@ Complex filter token notes:
 
 ## `?showPLP`
 
-Appending `?showPLP` to a landing page can expose its product listing and is
-useful for validating breadcrumbs and child pages. It is not seller-filtered by
-itself, so generated scrape URLs still resolve the Liverpool seller filter
-through `/getPlpFilter`.
+Appending `?showPLP` to a landing page exposes its product listing (`initialResults`
+in the Next.js RSC stream) instead of promotional landing blocks. Generated
+scrape URLs for `landing` pages resolve the Liverpool seller filter through
+`/api/plp/search` and append `?showPLP` to `/tienda/{category_id_lower}/{N-token}`.
 
 ## Adding A Page
 
 1. Capture the canonical URL, page name, breadcrumb, slug, and category id.
-2. Confirm `/getPlpFilter` can resolve a Liverpool-seller URL for that page.
-3. Confirm the resolver response selected navigation contains
-   `variants.sellernames = liverpool`.
+2. Confirm `/api/plp/search` can resolve a Liverpool-seller URL for that page.
+3. Confirm the resolver response selects `variants.sellernames = liverpool`.
 4. Confirm the selected `ancestors` refinement matches the page category id.
 5. Add the page metadata to `Page` in `provider/liverpool/options.py`, including aliases
    only when they cannot collide with another page.
@@ -135,14 +140,15 @@ through `/getPlpFilter`.
 
 ## Validation Recipe
 
-Use a browser-like request to `/getPlpFilter`, parse the JSON, and inspect:
+Use a browser-like `POST` request to `/api/plp/search`, parse the JSON, and inspect:
 
 ```text
-mainContent.originalRequest.encryptedFullUrl
-mainContent.selectedNavigation
+data.encryptedFilters
+data.filter
+data.filtersGroups
 ```
 
-The expected selected navigation for generated scrape URLs is:
+The expected refinements for generated scrape URLs are:
 
 ```text
 variants.sellernames -> liverpool

@@ -234,12 +234,16 @@ HEADER_PROFILES: tuple[HeaderProfile, ...] = (
         sec_gpc="1",
         cache_control="max-age=0",
     ),
-    _firefox_profile(
-        version="150",
-        platform="Linux",
-        accept_language="en-US,en;q=0.9,es;q=0.8",
-        dnt=None,
-        sec_gpc=None,
+    _chromium_profile(
+        browser="Chrome",
+        version="147",
+        platform="Windows",
+        platform_version="15.0.0",
+        arch="x86",
+        bitness="64",
+        accept_language="es-419,es;q=0.9,en-US;q=0.8,en;q=0.7",
+        dnt="1",
+        sec_gpc="1",
     ),
     _safari_profile(
         version="18.6",
@@ -250,8 +254,8 @@ HEADER_PROFILES: tuple[HeaderProfile, ...] = (
     _safari_profile(
         version="18.6",
         accept_language="es-ES,es;q=0.9,en-US;q=0.8",
-        dnt=None,
-        sec_gpc=None,
-        sec_fetch_site="same-site",
+        dnt="1",
+        sec_gpc="1",
+        sec_fetch_site="none",
     ),
 )

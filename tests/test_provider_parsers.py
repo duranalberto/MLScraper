@@ -13,6 +13,7 @@ from provider.amazon.urls import build_amazon_url, build_search_url, preview_ama
 from provider.liverpool import urls as lv_urls
 from provider.liverpool.motor import Liverpool
 from provider.liverpool.options import (
+    LIVERPOOL_SELLER_FILTER_ID,
     LIVERPOOL_SELLER_REFINEMENT_NAME,
     LIVERPOOL_SELLER_REFINEMENT_VALUE,
     Page as LiverpoolPage,
@@ -258,40 +259,40 @@ class MercadoLibrePaginationTests(unittest.TestCase):
 class LiverpoolUrlTests(unittest.TestCase):
     known_seller_urls = {
         LiverpoolPage.linea_blanca_y_electrodomesticos: (
-            "https://www.liverpool.com.mx/tienda/l%C3%ADnea-blanca-y-electrodom%C3%A9sticos/"
-            "N-S1sLjNksKoG%2BC2c1SDPsHKIBKNV9C39qzAQKlWKyNPun2aJSsdu2MIlSvIBK7fjU"
+            "https://www.liverpool.com.mx/tienda/catst42832389/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHKIBKNV9C39qzAQKlWKyNPun2aJSsdu2MIlSvIBK7fjU?showPLP"
         ),
         LiverpoolPage.electrodomesticos_de_cocina: (
-            "https://www.liverpool.com.mx/tienda/electrodom%C3%A9sticos-de-cocina/"
-            "N-S1sLjNksKoG%2BC2c1SDPsHE2WJgzT1N18wn6bm3Crd%2BLSeXXyPBbJePl81tX2VT0v"
+            "https://www.liverpool.com.mx/tienda/catst42832953/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHE2WJgzT1N18wn6bm3Crd%2BLSeXXyPBbJePl81tX2VT0v?showPLP"
         ),
         LiverpoolPage.hornos_electricos: (
-            "https://www.liverpool.com.mx/tienda/hornos-el%C3%A9ctricos/"
+            "https://www.liverpool.com.mx/tienda/catst53843927/"
             "N-S1sLjNksKoG%2BC2c1SDPsHDLkL1UcSQDvtOqhAagDbUKyQ4wGi88mGsyxG1aD%2B3uQ"
         ),
         LiverpoolPage.computacion: (
-            "https://www.liverpool.com.mx/tienda/computaci%C3%B3n/"
-            "N-S1sLjNksKoG%2BC2c1SDPsHN%2BJ%2BVnTTvZIur1XfBh58ds%3D"
+            "https://www.liverpool.com.mx/tienda/cat3410055/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHN%2BJ%2BVnTTvZIur1XfBh58ds%3D?showPLP"
         ),
         LiverpoolPage.laptops: (
-            "https://www.liverpool.com.mx/tienda/laptops/"
+            "https://www.liverpool.com.mx/tienda/catst10075558/"
             "N-S1sLjNksKoG%2BC2c1SDPsHADb51HPoq41uykVTx%2F8p7q4Lv5kmJ%2FB7n9SHDZAiZOr"
         ),
         LiverpoolPage.videojuegos: (
-            "https://www.liverpool.com.mx/tienda/videojuegos/"
-            "N-S1sLjNksKoG%2BC2c1SDPsHHgKKoxCWs4ssLitZ2y5bdQ%3D"
+            "https://www.liverpool.com.mx/tienda/cat670055/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHHgKKoxCWs4ssLitZ2y5bdQ%3D?showPLP"
         ),
         LiverpoolPage.nintendo: (
-            "https://www.liverpool.com.mx/tienda/nintendo/"
-            "N-S1sLjNksKoG%2BC2c1SDPsHKoOUK876ftr4S1vpt6rlqU%3D"
+            "https://www.liverpool.com.mx/tienda/cat5030010/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHKoOUK876ftr4S1vpt6rlqU%3D?showPLP"
         ),
         LiverpoolPage.juegos_nintendo: (
-            "https://www.liverpool.com.mx/tienda/juegos-nintendo/"
+            "https://www.liverpool.com.mx/tienda/catst14539980/"
             "N-S1sLjNksKoG%2BC2c1SDPsHEMtiDHLusAuxLK0y30fWRU5PhnhiYjJElHuz9EseRgf"
         ),
         LiverpoolPage.apple: (
-            "https://www.liverpool.com.mx/tienda/apple/"
-            "N-S1sLjNksKoG%2BC2c1SDPsHNm0puD%2BxMdUs8fFWfZr2VPe%2F6v1sCWzDBDSulA990d4"
+            "https://www.liverpool.com.mx/tienda/catst2145072/"
+            "N-S1sLjNksKoG%2BC2c1SDPsHNm0puD%2BxMdUs8fFWfZr2VPe%2F6v1sCWzDBDSulA990d4?showPLP"
         ),
     }
 
@@ -312,35 +313,56 @@ class LiverpoolUrlTests(unittest.TestCase):
             return self.payload
 
     def _seller_payload(self, encrypted_url: str, page: LiverpoolPage | None = None) -> dict:
-        selected_navigation = []
+        filters_groups = [
+            {
+                "name": "Vendido por",
+                "dimensionName": LIVERPOOL_SELLER_REFINEMENT_NAME,
+                "filter": [
+                    {
+                        "label": LIVERPOOL_SELLER_REFINEMENT_VALUE,
+                        "filterId": LIVERPOOL_SELLER_FILTER_ID,
+                        "selected": True,
+                    }
+                ],
+            }
+        ]
+        filter_parts = [
+            'attributes.productSiteIds: ANY("liverpool")',
+            f'attributes.sellernames: ANY("{LIVERPOOL_SELLER_REFINEMENT_VALUE}")',
+        ]
         if page is not None:
-            selected_navigation.append(
+            filters_groups.append(
                 {
-                    "name": "ancestors",
-                    "refinements": [{"value": page.value.category_id}],
+                    "name": "Categoría",
+                    "dimensionName": "Category",
+                    "ancestors": [
+                        {
+                            "label": page.value.display_name,
+                            "categoryId": page.value.category_id.lower(),
+                            "selected": True,
+                        }
+                    ],
+                    "filter": [],
                 }
             )
-        selected_navigation.append(
-            {
-                "name": LIVERPOOL_SELLER_REFINEMENT_NAME,
-                "refinements": [{"value": LIVERPOOL_SELLER_REFINEMENT_VALUE}],
-            }
-        )
+            filter_parts.append(f'attributes.ancestors: ANY("{page.value.category_id}")')
+
         return {
-            "mainContent": {
-                "originalRequest": {"encryptedFullUrl": encrypted_url},
-                "selectedNavigation": selected_navigation,
+            "data": {
+                "encryptedFilters": encrypted_url,
+                "filter": " AND ".join(filter_parts),
+                "filtersGroups": filters_groups,
             }
         }
 
     def _mock_seller_url(self, encrypted_url: str, page: LiverpoolPage | None = None):
         return patch(
-            "provider.liverpool.urls.requests.get",
+            "provider.liverpool.urls.requests.post",
             return_value=self._MockResponse(self._seller_payload(encrypted_url, page)),
         )
 
     def _segment_for_page(self, page: LiverpoolPage) -> str:
-        return self.known_seller_urls[page].rsplit("/", 1)[-1]
+        return self.known_seller_urls[page].rsplit("/", 1)[-1].split("?", 1)[0]
 
     def test_generated_search_url_uses_verified_liverpool_seller_resolver(self) -> None:
         encrypted_url = "N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=ventilador"
@@ -351,9 +373,9 @@ class LiverpoolUrlTests(unittest.TestCase):
                 "N-8BAqotJ%2FHmg946pY%2BECjww%3D%3D?s=ventilador",
             )
 
-        params = resolver.call_args.kwargs["params"]
-        self.assertEqual(params["s"], "ventilador")
-        self.assertEqual(params["Fs"], "liverpool")
+        body = resolver.call_args.kwargs["json"]
+        self.assertEqual(body["query"], "ventilador")
+        self.assertEqual(body["appliedFilters"], [LIVERPOOL_SELLER_FILTER_ID])
 
     def test_search_routes_require_explicit_liverpool_query(self) -> None:
         with self.assertRaisesRegex(ValueError, "search query cannot be blank"):
@@ -373,9 +395,9 @@ class LiverpoolUrlTests(unittest.TestCase):
                 self.known_seller_urls[LiverpoolPage.hornos_electricos],
             )
 
-        params = resolver.call_args.kwargs["params"]
-        self.assertEqual(params["categoryId"], "CATST53843927")
-        self.assertNotIn("s", params)
+        body = resolver.call_args.kwargs["json"]
+        self.assertEqual(body["categoryId"], "catst53843927")
+        self.assertNotIn("query", body)
 
     def test_generated_page_query_uses_root_token_form(self) -> None:
         with self._mock_seller_url(
@@ -414,16 +436,16 @@ class LiverpoolUrlTests(unittest.TestCase):
         with self._mock_seller_url(encrypted_url, LiverpoolPage.playstation) as resolver:
             self.assertEqual(
                 build_liverpool_url(page=LiverpoolPage.playstation),
-                "https://www.liverpool.com.mx/tienda/playstation/N-playstationToken%3D",
+                "https://www.liverpool.com.mx/tienda/cat1161024/N-playstationToken%3D?showPLP",
             )
             self.assertEqual(
                 build_liverpool_url(page=LiverpoolPage.playstation, query="dualsense"),
                 "https://www.liverpool.com.mx/tienda/N-playstationToken%3D?s=dualsense",
             )
 
-        params = resolver.call_args.kwargs["params"]
-        self.assertEqual(params["categoryId"], "CAT1161024")
-        self.assertEqual(params["Fs"], "liverpool")
+        body = resolver.call_args.kwargs["json"]
+        self.assertEqual(body["categoryId"], "cat1161024")
+        self.assertEqual(body["appliedFilters"], [LIVERPOOL_SELLER_FILTER_ID])
 
     def test_zapatos_talla_seeded_urls_match_documented_fixtures(self) -> None:
         self.assertEqual(
@@ -476,35 +498,37 @@ class LiverpoolUrlTests(unittest.TestCase):
     def test_resolver_rejects_missing_token(self) -> None:
         payload = self._seller_payload("", LiverpoolPage.nintendo)
         with patch(
-            "provider.liverpool.urls.requests.get",
+            "provider.liverpool.urls.requests.post",
             return_value=self._MockResponse(payload),
         ):
             with self.assertRaisesRegex(ValueError, "no encrypted URL"):
                 build_page_url(LiverpoolPage.nintendo)
 
     def test_resolver_rejects_missing_seller_refinement(self) -> None:
-        payload = self._seller_payload(self._segment_for_page(LiverpoolPage.nintendo))
-        payload["mainContent"]["selectedNavigation"] = [
-            {"name": "ancestors", "refinements": [{"value": "CAT5030010"}]}
-        ]
+        payload = {
+            "data": {
+                "encryptedFilters": self._segment_for_page(LiverpoolPage.nintendo),
+                "filter": 'attributes.ancestors: ANY("CAT5030010")',
+                "filtersGroups": [],
+            }
+        }
         with patch(
-            "provider.liverpool.urls.requests.get",
+            "provider.liverpool.urls.requests.post",
             return_value=self._MockResponse(payload),
         ):
             with self.assertRaisesRegex(ValueError, "did not select Liverpool as seller"):
                 build_page_url(LiverpoolPage.nintendo)
 
     def test_resolver_rejects_wrong_page_ancestor(self) -> None:
-        payload = self._seller_payload(self._segment_for_page(LiverpoolPage.nintendo))
-        payload["mainContent"]["selectedNavigation"] = [
-            {"name": "ancestors", "refinements": [{"value": "CATWRONG"}]},
-            {
-                "name": LIVERPOOL_SELLER_REFINEMENT_NAME,
-                "refinements": [{"value": LIVERPOOL_SELLER_REFINEMENT_VALUE}],
-            },
-        ]
+        payload = {
+            "data": {
+                "encryptedFilters": self._segment_for_page(LiverpoolPage.nintendo),
+                "filter": 'attributes.sellernames: ANY("liverpool") AND attributes.ancestors: ANY("CATWRONG")',
+                "filtersGroups": [],
+            }
+        }
         with patch(
-            "provider.liverpool.urls.requests.get",
+            "provider.liverpool.urls.requests.post",
             return_value=self._MockResponse(payload),
         ):
             with self.assertRaisesRegex(ValueError, "did not select page ancestor"):
@@ -512,7 +536,7 @@ class LiverpoolUrlTests(unittest.TestCase):
 
     def test_resolver_request_failure_requires_explicit_url(self) -> None:
         with patch(
-            "provider.liverpool.urls.requests.get",
+            "provider.liverpool.urls.requests.post",
             side_effect=lv_urls.requests.RequestException("boom"),
         ):
             with self.assertRaisesRegex(ValueError, "request failed"):
@@ -779,6 +803,73 @@ class ProviderParserEdgeTests(unittest.TestCase):
         self.assertEqual(
             next_url,
             "https://www.liverpool.com.mx/tienda/N-token/page-2?s=ventilador",
+        )
+
+    def test_liverpool_parses_next_app_router_rsc_initial_results(self) -> None:
+        initial_results = {
+            "records": [
+                {
+                    "productId": "1196338436",
+                    "title": "Laptop Macbook Neo 13 pulgadas",
+                    "priceInfo": {
+                        "salePrice": 15999,
+                        "listPrice": {"minPrice": 15999, "maxPrice": 18499},
+                        "promoPrice": {"minPrice": 15999, "maxPrice": 18499},
+                    },
+                },
+                {
+                    "productId": "1206318232",
+                    "title": "Juego EA Sports FC 27",
+                    "priceInfo": {
+                        "salePrice": 1599,
+                        "listPrice": {"price": 1599},
+                        "promoPrice": {"price": 1499.5},
+                    },
+                },
+                {
+                    "productId": "bad-no-price",
+                    "title": "Sin Precio",
+                    "priceInfo": {},
+                },
+            ],
+            "pageInfo": {"noOfPages": 3, "currentPage": 1},
+        }
+        rsc_chunk = (
+            '389:[["$","$L3af",null,{"events":"$undefined","initialResults":'
+            + json.dumps(initial_results)
+            + "}]]"
+        )
+        html = f"<html><body><script>self.__next_f.push([1,{json.dumps(rsc_chunk)}])</script></body></html>"
+        with empty_article_storage():
+            motor = Liverpool(
+                "Apple",
+                "https://www.liverpool.com.mx/tienda/catst2145072/N-token?showPLP",
+                storage_path="tests/lv-rsc.json",
+            )
+
+        items, next_url = motor.scrape_page({"content": html, "url": motor.url})
+
+        self.assertFalse(motor._scrape_incomplete)
+        self.assertEqual(
+            items,
+            [
+                {
+                    "identifier": "1196338436",
+                    "title": "Laptop Macbook Neo 13 pulgadas",
+                    "price": 15999.0,
+                    "url": "https://www.liverpool.com.mx/tienda/pdp/laptop-macbook-neo-13-pulgadas/1196338436",
+                },
+                {
+                    "identifier": "1206318232",
+                    "title": "Juego EA Sports FC 27",
+                    "price": 1499.5,
+                    "url": "https://www.liverpool.com.mx/tienda/pdp/juego-ea-sports-fc-27/1206318232",
+                },
+            ],
+        )
+        self.assertEqual(
+            next_url,
+            "https://www.liverpool.com.mx/tienda/catst2145072/N-token/page-2?showPLP",
         )
 
     def test_palacio_next_url_advances_start_until_total_is_reached(self) -> None:
